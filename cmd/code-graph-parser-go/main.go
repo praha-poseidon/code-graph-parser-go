@@ -1,3 +1,11 @@
+// code-graph-parser-go is the Go language process parser for code-graph-engine.
+//
+// Java does not parse Go. This CLI is invoked by code-graph-parser-process:
+//
+//	stdin  → ParseRequest JSON
+//	stdout → GraphDelta JSON
+//
+// Same role as code-graph-parser-js.
 package main
 
 import (
@@ -8,17 +16,14 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/praha-poseidon/code-graph-parser-go/internal/ast"
-	"github.com/praha-poseidon/code-graph-parser-go/internal/endpoint"
-	"github.com/praha-poseidon/code-graph-parser-go/internal/graph"
+	"github.com/praha-poseidon/code-graph-parser-go/internal/parse"
 	"github.com/praha-poseidon/code-graph-parser-go/internal/protocol"
-	"github.com/praha-poseidon/static-extract-go/extractapi"
 )
 
 func main() {
-	stdio := flag.Bool("stdio", false, "read ParseRequest JSON from stdin, write GraphDelta JSON to stdout")
-	project := flag.String("project", "", "project root (debug mode without --stdio)")
-	rule := flag.String("rule", "", "optional SER file for endpoint extraction (debug)")
+	stdio := flag.Bool("stdio", false, "process protocol: ParseRequest on stdin → GraphDelta on stdout")
+	project := flag.String("project", "", "debug: parse module at path (pretty JSON to stdout)")
+	rule := flag.String("rule", "", "debug: optional SER file for endpoints")
 	flag.Parse()
 
 	if *stdio {
@@ -28,10 +33,23 @@ func main() {
 		}
 		return
 	}
+
 	if *project == "" {
-		fmt.Fprintln(os.Stderr, "usage: code-graph-parser-go --stdio | --project <dir> [--rule file.ser]")
+		fmt.Fprintf(os.Stderr, `Usage:
+  code-graph-parser-go --stdio
+      Read one ParseRequest JSON from stdin, write one GraphDelta JSON to stdout.
+      Used by code-graph-engine / code-graph-parser-process.
+
+  code-graph-parser-go --project <moduleRoot> [--rule file.ser]
+      Local debug (pretty-print GraphDelta).
+
+Engine example:
+  -Dcodegraph.parser.process.languages=go
+  -Dcodegraph.parser.process.go.command="/path/to/code-graph-parser-go --stdio"
+`)
 		os.Exit(2)
 	}
+
 	req := protocol.ParseRequest{
 		ProjectName: filepath.Base(*project),
 		Language:    "go",
@@ -45,14 +63,17 @@ func main() {
 		}
 		req.RuleSources = []string{string(b)}
 	}
-	delta, err := parse(req)
+	delta, err := parse.Parse(req)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err.Error())
 		os.Exit(1)
 	}
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")
-	_ = enc.Encode(delta)
+	if err := enc.Encode(delta); err != nil {
+		fmt.Fprintln(os.Stderr, err.Error())
+		os.Exit(1)
+	}
 }
 
 func runStdio() error {
@@ -62,51 +83,15 @@ func runStdio() error {
 	}
 	var req protocol.ParseRequest
 	if err := json.Unmarshal(data, &req); err != nil {
-		return err
+		return fmt.Errorf("invalid ParseRequest JSON: %w", err)
 	}
 	if req.Language == "" {
 		req.Language = "go"
 	}
-	delta, err := parse(req)
+	delta, err := parse.Parse(req)
 	if err != nil {
 		return err
 	}
+	// compact JSON for process adapter
 	return json.NewEncoder(os.Stdout).Encode(delta)
-}
-
-func parse(req protocol.ParseRequest) (protocol.GraphDelta, error) {
-	root := req.ProjectRoot
-	if root == "" && len(req.SourceRoots) > 0 {
-		root = req.SourceRoots[0]
-	}
-	if root != "" {
-		if a, err := filepath.Abs(root); err == nil {
-			root = a
-			req.ProjectRoot = root
-		}
-	}
-	patterns := []string{"./..."}
-	pkgs, err := ast.Load(ast.LoadConfig{Dir: root, Patterns: patterns})
-	if err != nil {
-		return protocol.GraphDelta{}, err
-	}
-	delta := graph.Build(req, pkgs)
-
-	if len(req.RuleSources) > 0 {
-		facts, err := extractapi.Run(extractapi.Request{
-			ProjectRoot:    root,
-			Packages:       pkgs,
-			RuleSources:    req.RuleSources,
-			ExternalValues: req.ExternalValues,
-		})
-		if err != nil {
-			delta.Diagnostics = append(delta.Diagnostics, protocol.Diagnostic{
-				Severity: "ERROR",
-				Message:  "static-extract: " + err.Error(),
-			})
-		} else {
-			delta.Endpoints = endpoint.ToGraphEndpoints(req.ProjectName, facts)
-		}
-	}
-	return delta, nil
 }
