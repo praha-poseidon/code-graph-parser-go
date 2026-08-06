@@ -26,9 +26,10 @@ type GraphDelta struct {
 	Functions              []CodeFunction     `json:"functions"`
 	Endpoints              []map[string]any   `json:"endpoints"`
 	Relationships          []CodeRelationship `json:"relationships"`
-	DeletedNodeIds         []string           `json:"deletedNodeIds"`
-	DeletedRelationshipIds []string           `json:"deletedRelationshipIds"`
-	Diagnostics            []Diagnostic       `json:"diagnostics"`
+	// Deleted* must remain empty from this parser. The engine owns delete/cascade.
+	DeletedNodeIds         []string     `json:"deletedNodeIds"`
+	DeletedRelationshipIds []string     `json:"deletedRelationshipIds"`
+	Diagnostics            []Diagnostic `json:"diagnostics"`
 }
 
 type DeltaScope struct {

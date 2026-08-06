@@ -1,6 +1,13 @@
-// Package parse builds a GraphDelta from a ParseRequest (code-graph process protocol).
+// Package parse builds one incremental GraphDelta for the engine process protocol.
 //
-// Pipeline (aligned with java-jdt processors):
+// Responsibility boundary:
+//   - Input:  ParseRequest from the engine (often only changed sourceFiles).
+//   - Output: nodes/relationships/endpoints discovered for this parse.
+//   - NOT responsible for graph storage, merge policy, or deletions.
+//     deletedNodeIds / deletedRelationshipIds stay empty; the engine applies
+//     SOURCE_DELETED and cascade itself (same as parser-js).
+//
+// Pipeline:
 //  1. packages / units / functions + PACKAGE_TO_UNIT / UNIT_TO_FUNCTION
 //  2. CALLS (+ placeholder functions for external targets)
 //  3. EXTENDS (struct/interface embed)
@@ -38,7 +45,8 @@ func Parse(req protocol.ParseRequest) (protocol.GraphDelta, error) {
 	}
 	req.ProjectRoot = abs
 
-	// Always load full module for types; FileAllow filters emitted nodes when sourceFiles set.
+	// Load module for type information. When sourceFiles is set, only nodes from
+	// those files are emitted in the delta (incremental result for the engine).
 	pkgs, err := load.Packages(load.Config{
 		Dir:      abs,
 		Patterns: []string{"./..."},

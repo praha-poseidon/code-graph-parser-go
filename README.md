@@ -2,18 +2,21 @@
 
 Go language **process parser** for [code-graph-engine](https://github.com/praha-poseidon/code-graph-engine).
 
-Same role as **code-graph-parser-js**: Java invokes this CLI, receives **GraphDelta**, and **writes the graph itself**.
+Same role as **code-graph-parser-js**:
 
 ```text
-code-graph-parser-process (Java)
-    stdin  → ParseRequest JSON
-    stdout ← GraphDelta JSON
-         │
-         ▼
+引擎发增量 ParseRequest（含 sourceFiles / changeType）
+        │
+        ▼
 code-graph-parser-go --stdio
-    go/packages (AST + types)
-    nodes + relationships (+ endpoints via SER)
+  只解析这次相关源码 → 产出本次 GraphDelta（节点+关系）
+  deletedNodeIds / deletedRelationshipIds 保持空（删除由引擎做）
+        │
+        ▼
+code-graph-engine 合并/落库/删除/级联
 ```
+
+**Parser 不做图存储，不做删除策略。** 引擎自己根据变更类型应用 delta。
 
 ## Build / test
 
@@ -46,8 +49,9 @@ go build -o bin/code-graph-parser-go ./cmd/code-graph-parser-go
 | OVERRIDES (interface methods + embed shadow) | yes |
 | Endpoints (`ruleSources` → static-extract-go) | yes |
 | ENDPOINT_TO_FUNCTION / FUNCTION_TO_ENDPOINT | yes |
-| sourceFiles filter (incremental emit) | yes |
-| MATCHES (cross-service) | engine-side |
+| 按 `sourceFiles` 产出本次增量涉及的节点 | yes（类型解析仍 load 模块） |
+| 删除节点/关系 | **否 — 引擎**（`SOURCE_DELETED` 等） |
+| MATCHES 跨服务匹配 | **否 — 引擎** |
 
 IDs / `relationshipType` names match Java `GraphIds` + `RelationshipType` enum.
 
