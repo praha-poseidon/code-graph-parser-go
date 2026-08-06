@@ -2,70 +2,73 @@
 
 Go language **process parser** for [code-graph-engine](https://github.com/praha-poseidon/code-graph-engine).
 
-Same role as **code-graph-parser-js**:
+Same role as **code-graph-parser-js**: Java invokes this CLI, receives **GraphDelta**, and **writes the graph itself**.
 
 ```text
-Java engine (code-graph-parser-process)
-    │  stdin:  ParseRequest JSON
-    │  stdout: GraphDelta JSON
-    ▼
+code-graph-parser-process (Java)
+    stdin  → ParseRequest JSON
+    stdout ← GraphDelta JSON
+         │
+         ▼
 code-graph-parser-go --stdio
-    │  go/packages (AST + types)
-    ▼
-nodes + relationships (+ optional endpoints via SER)
+    go/packages (AST + types)
+    nodes + relationships (+ endpoints via SER)
 ```
 
-Java **does not** parse Go. This CLI produces the graph delta; the engine writes storage.
-
-## Build
+## Build / test
 
 ```bash
-export PATH="$HOME/.local/go/bin:$PATH"   # if needed
+export PATH="$HOME/.local/go/bin:$PATH"
 go test ./...
 go build -o bin/code-graph-parser-go ./cmd/code-graph-parser-go
+./scripts/smoke-stdio.sh
 ```
 
-## Process protocol (engine)
+## Engine config
 
 ```bash
 -Dcodegraph.parser.process.languages=go
 -Dcodegraph.parser.process.go.command="/abs/path/code-graph-parser-go --stdio"
 ```
 
-## Debug
+## GraphDelta coverage
 
-```bash
-./bin/code-graph-parser-go --project testdata/module
-./bin/code-graph-parser-go --project ../static-extract-go/examples/conformance/http-handlefunc \
-  --rule ../static-extract-go/examples/conformance/http-handlefunc/rule.ser
-./scripts/smoke-stdio.sh
-```
-
-## GraphDelta coverage (current)
-
-| Kind | Status |
+| Item | Status |
 |------|--------|
 | CodePackage | yes |
-| CodeUnit (struct/interface + package-level synthetic) | yes |
-| CodeFunction | yes |
+| CodeUnit (struct / interface / package synthetic) | yes |
+| CodeFunction (incl. interface methods, external placeholders) | yes |
 | PACKAGE_TO_UNIT | yes |
 | UNIT_TO_FUNCTION | yes |
-| CALLS (types.Info) | yes |
+| CALLS (types.Info + placeholders) | yes |
 | EXTENDS (struct/interface embed) | yes |
-| IMPLEMENTS / OVERRIDES | not yet |
-| Endpoints via `ruleSources` → static-extract-go | yes |
-| ENDPOINT_TO_FUNCTION | not yet |
+| IMPLEMENTS (`types.Implements`) | yes |
+| OVERRIDES (interface methods + embed shadow) | yes |
+| Endpoints (`ruleSources` → static-extract-go) | yes |
+| ENDPOINT_TO_FUNCTION / FUNCTION_TO_ENDPOINT | yes |
+| sourceFiles filter (incremental emit) | yes |
+| MATCHES (cross-service) | engine-side |
 
-IDs follow engine `GraphIds` prefixes (`pkg:`, `unit:`, `fn:`, `rel:`). Relationship type strings match Java `RelationshipType` enum names.
+IDs / `relationshipType` names match Java `GraphIds` + `RelationshipType` enum.
 
 ## Layout
 
 ```text
-cmd/code-graph-parser-go/   CLI --stdio
-internal/protocol/          ParseRequest / GraphDelta JSON
-internal/ids/               GraphIds-compatible ids
-internal/load/              go/packages
-internal/parse/             pipeline: nodes → calls → embed → endpoints
-testdata/                   modules for tests
-docs/ENGINE_INTEGRATION.md
+cmd/code-graph-parser-go/     CLI --stdio
+internal/protocol/            ParseRequest / GraphDelta
+internal/ids/                 GraphIds-compatible
+internal/load/                go/packages
+internal/parse/
+  parse.go                    pipeline orchestrator
+  nodes.go                    packages / units / functions
+  calls.go                    CALLS + placeholders
+  inheritance.go              EXTENDS (embed)
+  implements.go               IMPLEMENTS
+  overrides.go                OVERRIDES
+  endpoints.go                SER endpoints + links
+testdata/                     module, embed, iface fixtures
 ```
+
+## Optional endpoints
+
+Pass SER in `ParseRequest.ruleSources` (or `--rule` in debug). Without SER you still get the full structure graph.

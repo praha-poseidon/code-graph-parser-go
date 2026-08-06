@@ -2,6 +2,8 @@ package parse
 
 import (
 	"go/ast"
+	"go/token"
+	"go/types"
 	"strings"
 
 	"github.com/praha-poseidon/code-graph-parser-go/internal/ids"
@@ -14,11 +16,16 @@ func collectPackagesUnitsFunctions(c *Context) {
 	seenPkg := map[string]bool{}
 
 	for _, pkg := range c.Pkgs {
-		if pkg.PkgPath == "" || strings.HasSuffix(pkg.PkgPath, ".test") {
+		if pkg.PkgPath == "" || isTestPackage(pkg) {
 			continue
 		}
 		pkgID := ids.PackageID(pkg.PkgPath)
 		filePath := packageFilePath(c, pkg)
+
+		// Skip package entirely if incremental filter excludes all its files
+		if c.FileAllow != nil && !packageHasAllowedFile(c, pkg) {
+			continue
+		}
 
 		if !seenPkg[pkgID] {
 			seenPkg[pkgID] = true
@@ -35,8 +42,13 @@ func collectPackagesUnitsFunctions(c *Context) {
 			})
 		}
 
+		// Ensure package-level synthetic unit exists when free funcs appear
 		for _, file := range pkg.Syntax {
-			rel := c.relPath(pkg.Fset.Position(file.Pos()).Filename)
+			abs := pkg.Fset.Position(file.Pos()).Filename
+			rel := c.relPath(abs)
+			if !c.allowFile(rel) {
+				continue
+			}
 			ast.Inspect(file, func(n ast.Node) bool {
 				switch x := n.(type) {
 				case *ast.TypeSpec:
@@ -53,7 +65,28 @@ func collectPackagesUnitsFunctions(c *Context) {
 				return true
 			})
 		}
+
+		// Interface methods as function nodes (for OVERRIDES / IMPLEMENTS method links)
+		emitInterfaceMethodsFromTypes(c, pkg, pkgID)
 	}
+}
+
+func isTestPackage(pkg *packages.Package) bool {
+	return strings.HasSuffix(pkg.PkgPath, ".test") || strings.HasSuffix(pkg.Name, "_test")
+}
+
+func packageHasAllowedFile(c *Context, pkg *packages.Package) bool {
+	for _, f := range pkg.GoFiles {
+		if c.allowFile(c.relPath(f)) {
+			return true
+		}
+	}
+	for _, f := range pkg.CompiledGoFiles {
+		if c.allowFile(c.relPath(f)) {
+			return true
+		}
+	}
+	return false
 }
 
 func packageName(pkg *packages.Package) string {
@@ -67,20 +100,25 @@ func packageName(pkg *packages.Package) string {
 }
 
 func packageFilePath(c *Context, pkg *packages.Package) string {
+	for _, f := range pkg.GoFiles {
+		rel := c.relPath(f)
+		if c.allowFile(rel) {
+			return rel
+		}
+	}
 	if len(pkg.GoFiles) > 0 {
 		return c.relPath(pkg.GoFiles[0])
 	}
 	if len(pkg.CompiledGoFiles) > 0 {
 		return c.relPath(pkg.CompiledGoFiles[0])
 	}
-	// fallback: go.mod at root
 	return "go.mod"
 }
 
 func emitUnit(c *Context, pkg *packages.Package, pkgID, rel string, ts *ast.TypeSpec) {
 	name := ts.Name.Name
 	qname := pkg.PkgPath + "." + name
-	unitType := "class" // default: struct / alias → class-like for engine
+	unitType := "class"
 	switch ts.Type.(type) {
 	case *ast.InterfaceType:
 		unitType = "interface"
@@ -92,7 +130,12 @@ func emitUnit(c *Context, pkg *packages.Package, pkgID, rel string, ts *ast.Type
 	end := pkg.Fset.Position(ts.End())
 	id := ids.UnitID(qname)
 	c.UnitByQName[qname] = id
-	c.UnitByQName[name] = id // local short name within package (last write wins)
+
+	var mods []string
+	if ts.Assign.IsValid() {
+		// type alias
+		mods = append(mods, "alias")
+	}
 
 	c.Delta.Units = append(c.Delta.Units, protocol.CodeUnit{
 		ID:              id,
@@ -104,6 +147,7 @@ func emitUnit(c *Context, pkg *packages.Package, pkgID, rel string, ts *ast.Type
 		GitRepoURL:      c.Req.GitRepoURL,
 		GitBranch:       c.Req.GitBranch,
 		UnitType:        unitType,
+		Modifiers:       mods,
 		PackageID:       pkgID,
 		StartLine:       intPtr(pos.Line),
 		EndLine:         intPtr(end.Line),
@@ -125,7 +169,7 @@ func emitFunction(c *Context, pkg *packages.Package, pkgID, rel string, fd *ast.
 	if fd.Recv != nil && len(fd.Recv.List) > 0 {
 		recvType = typeExprString(fd.Recv.List[0].Type)
 	}
-	sig := functionSignature(name, recvType, fd)
+	sig := functionSignature(name, recvType)
 	qname := pkg.PkgPath + "." + sig
 	id := ids.FunctionID(qname)
 	c.FuncByQName[qname] = id
@@ -133,14 +177,23 @@ func emitFunction(c *Context, pkg *packages.Package, pkgID, rel string, fd *ast.
 
 	pos := pkg.Fset.Position(fd.Pos())
 	end := pkg.Fset.Position(fd.End())
-	ret := ""
-	if fd.Type != nil && fd.Type.Results != nil {
-		var parts []string
-		for _, f := range fd.Type.Results.List {
-			parts = append(parts, typeExprString(f.Type))
-		}
-		ret = strings.Join(parts, ",")
+	// index body start for endpoint handler resolution
+	c.FuncAtFileLine[rel+":"+itoa(pos.Line)] = id
+	if fd.Body != nil {
+		bodyLine := pkg.Fset.Position(fd.Body.Pos()).Line
+		c.FuncAtFileLine[rel+":"+itoa(bodyLine)] = id
 	}
+	// register all lines in function range for endpoint matching
+	for line := pos.Line; line <= end.Line; line++ {
+		c.FuncAtFileLine[rel+":"+itoa(line)] = id
+	}
+
+	ret := resultTypes(fd)
+	var mods []string
+	if name == "init" {
+		mods = append(mods, "init")
+	}
+	isCtor := name == "New" || strings.HasPrefix(name, "New")
 
 	c.Delta.Functions = append(c.Delta.Functions, protocol.CodeFunction{
 		ID:              id,
@@ -153,14 +206,12 @@ func emitFunction(c *Context, pkg *packages.Package, pkgID, rel string, fd *ast.
 		GitBranch:       c.Req.GitBranch,
 		Signature:       sig,
 		ReturnType:      ret,
+		Modifiers:       mods,
+		IsConstructor:   boolPtr(isCtor),
 		StartLine:       intPtr(pos.Line),
 		EndLine:         intPtr(end.Line),
 	})
 
-	// UNIT_TO_FUNCTION for methods; free funcs attach to package via DECLARES-like PACKAGE? Engine only has UNIT_TO_FUNCTION.
-	// Free functions: create synthetic unit per file? Java always has class. For Go package-level funcs,
-	// attach UNIT_TO_FUNCTION only when receiver type unit exists; otherwise skip structure edge
-	// (function still listed; package CONTAIN via no PACKAGE_TO_FUNCTION in enum).
 	if recvType != "" {
 		unitQ := pkg.PkgPath + "." + baseIdent(recvType)
 		if unitID, ok := c.UnitByQName[unitQ]; ok {
@@ -174,33 +225,8 @@ func emitFunction(c *Context, pkg *packages.Package, pkgID, rel string, fd *ast.
 			})
 		}
 	} else {
-		// Package-level function: use a synthetic file unit so structure graph stays connected.
-		// Prefer linking via a synthetic unit id unit:<pkg>.(package) only if we emit it.
-		// Simpler approach matching many Go graphs: emit unit for package as "package functions container"
-		// Actually validator allows UNIT_TO_FUNCTION only Unit->Function. Emit synthetic unit per package for free funcs.
 		synthQ := pkg.PkgPath + ".(package)"
-		synthID := ids.UnitID(synthQ)
-		if _, ok := c.UnitByQName[synthQ]; !ok {
-			c.UnitByQName[synthQ] = synthID
-			c.Delta.Units = append(c.Delta.Units, protocol.CodeUnit{
-				ID:              synthID,
-				Name:            "(package)",
-				QualifiedName:   synthQ,
-				Language:        "go",
-				ProjectName:     c.projectName(),
-				ProjectFilePath: rel,
-				UnitType:        "class",
-				PackageID:       pkgID,
-			})
-			c.addRel(protocol.CodeRelationship{
-				ID:               ids.RelationshipID(pkgID, protocol.RelPackageToUnit, synthID),
-				FromNodeID:       pkgID,
-				ToNodeID:         synthID,
-				RelationshipType: protocol.RelPackageToUnit,
-				Language:         "go",
-				ProjectName:      c.projectName(),
-			})
-		}
+		synthID := ensurePackageUnit(c, pkg, pkgID, rel, synthQ)
 		c.addRel(protocol.CodeRelationship{
 			ID:               ids.RelationshipID(synthID, protocol.RelUnitToFunction, id),
 			FromNodeID:       synthID,
@@ -212,11 +238,123 @@ func emitFunction(c *Context, pkg *packages.Package, pkgID, rel string, fd *ast.
 	}
 }
 
-func functionSignature(name, recv string, fd *ast.FuncDecl) string {
+func ensurePackageUnit(c *Context, pkg *packages.Package, pkgID, rel, synthQ string) string {
+	if id, ok := c.UnitByQName[synthQ]; ok {
+		return id
+	}
+	synthID := ids.UnitID(synthQ)
+	c.UnitByQName[synthQ] = synthID
+	c.Delta.Units = append(c.Delta.Units, protocol.CodeUnit{
+		ID:              synthID,
+		Name:            "(package)",
+		QualifiedName:   synthQ,
+		Language:        "go",
+		ProjectName:     c.projectName(),
+		ProjectFilePath: rel,
+		GitRepoURL:      c.Req.GitRepoURL,
+		GitBranch:       c.Req.GitBranch,
+		UnitType:        "class",
+		PackageID:       pkgID,
+	})
+	c.addRel(protocol.CodeRelationship{
+		ID:               ids.RelationshipID(pkgID, protocol.RelPackageToUnit, synthID),
+		FromNodeID:       pkgID,
+		ToNodeID:         synthID,
+		RelationshipType: protocol.RelPackageToUnit,
+		Language:         "go",
+		ProjectName:      c.projectName(),
+	})
+	return synthID
+}
+
+// emitInterfaceMethodsFromTypes adds CodeFunction nodes for interface methods so OVERRIDES can target them.
+func emitInterfaceMethodsFromTypes(c *Context, pkg *packages.Package, pkgID string) {
+	if pkg.Types == nil {
+		return
+	}
+	scope := pkg.Types.Scope()
+	for _, name := range scope.Names() {
+		obj := scope.Lookup(name)
+		tn, ok := obj.(*types.TypeName)
+		if !ok {
+			continue
+		}
+		iface, ok := tn.Type().Underlying().(*types.Interface)
+		if !ok {
+			continue
+		}
+		unitQ := pkg.PkgPath + "." + tn.Name()
+		unitID, ok := c.UnitByQName[unitQ]
+		if !ok {
+			continue
+		}
+		// find file path from unit
+		rel := "go.mod"
+		for _, u := range c.Delta.Units {
+			if u.ID == unitID {
+				rel = u.ProjectFilePath
+				break
+			}
+		}
+		if !c.allowFile(rel) && rel != "go.mod" {
+			continue
+		}
+		for i := 0; i < iface.NumExplicitMethods(); i++ {
+			m := iface.ExplicitMethod(i)
+			sig := tn.Name() + "." + m.Name()
+			qname := pkg.PkgPath + "." + sig
+			id := ids.FunctionID(qname)
+			if _, exists := c.FuncByQName[qname]; exists {
+				continue
+			}
+			c.FuncByQName[qname] = id
+			ret := ""
+			if s, ok := m.Type().(*types.Signature); ok && s.Results() != nil {
+				var parts []string
+				for j := 0; j < s.Results().Len(); j++ {
+					parts = append(parts, types.TypeString(s.Results().At(j).Type(), (*types.Package).Name))
+				}
+				ret = strings.Join(parts, ",")
+			}
+			c.Delta.Functions = append(c.Delta.Functions, protocol.CodeFunction{
+				ID:              id,
+				Name:            m.Name(),
+				QualifiedName:   qname,
+				Language:        "go",
+				ProjectName:     c.projectName(),
+				ProjectFilePath: rel,
+				Signature:       sig,
+				ReturnType:      ret,
+				Modifiers:       []string{"interface"},
+			})
+			c.addRel(protocol.CodeRelationship{
+				ID:               ids.RelationshipID(unitID, protocol.RelUnitToFunction, id),
+				FromNodeID:       unitID,
+				ToNodeID:         id,
+				RelationshipType: protocol.RelUnitToFunction,
+				Language:         "go",
+				ProjectName:      c.projectName(),
+			})
+		}
+	}
+}
+
+func functionSignature(name, recv string) string {
 	if recv != "" {
 		return baseIdent(recv) + "." + name
 	}
 	return name
+}
+
+func resultTypes(fd *ast.FuncDecl) string {
+	if fd.Type == nil || fd.Type.Results == nil {
+		return ""
+	}
+	var parts []string
+	for _, f := range fd.Type.Results.List {
+		parts = append(parts, typeExprString(f.Type))
+	}
+	return strings.Join(parts, ",")
 }
 
 func typeExprString(e ast.Expr) string {
@@ -245,7 +383,26 @@ func typeExprString(e ast.Expr) string {
 		return "chan"
 	case *ast.Ellipsis:
 		return "..." + typeExprString(t.Elt)
+	case *ast.ParenExpr:
+		return typeExprString(t.X)
 	default:
 		return ""
 	}
 }
+
+func itoa(n int) string {
+	if n == 0 {
+		return "0"
+	}
+	var b [20]byte
+	i := len(b)
+	for n > 0 {
+		i--
+		b[i] = byte('0' + n%10)
+		n /= 10
+	}
+	return string(b[i:])
+}
+
+// ensure token import used for Assign check
+var _ = token.NoPos

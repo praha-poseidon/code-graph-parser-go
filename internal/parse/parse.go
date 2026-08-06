@@ -1,4 +1,12 @@
 // Package parse builds a GraphDelta from a ParseRequest (code-graph process protocol).
+//
+// Pipeline (aligned with java-jdt processors):
+//  1. packages / units / functions + PACKAGE_TO_UNIT / UNIT_TO_FUNCTION
+//  2. CALLS (+ placeholder functions for external targets)
+//  3. EXTENDS (struct/interface embed)
+//  4. IMPLEMENTS (types.Implements)
+//  5. OVERRIDES (interface methods + embed shadow)
+//  6. endpoints from ruleSources + ENDPOINT_TO_FUNCTION / FUNCTION_TO_ENDPOINT
 package parse
 
 import (
@@ -30,6 +38,7 @@ func Parse(req protocol.ParseRequest) (protocol.GraphDelta, error) {
 	}
 	req.ProjectRoot = abs
 
+	// Always load full module for types; FileAllow filters emitted nodes when sourceFiles set.
 	pkgs, err := load.Packages(load.Config{
 		Dir:      abs,
 		Patterns: []string{"./..."},
@@ -46,15 +55,13 @@ func Parse(req protocol.ParseRequest) (protocol.GraphDelta, error) {
 
 	c := newContext(req, abs, pkgs)
 
-	// 1) nodes + PACKAGE_TO_UNIT / UNIT_TO_FUNCTION
 	collectPackagesUnitsFunctions(c)
-	// 2) CALLS
 	collectCalls(c)
-	// 3) EXTENDS (embed)
 	collectInheritance(c)
-	// 4) optional endpoints from ruleSources (separate module)
+	collectImplements(c)
+	collectOverrides(c)
 	if err := attachEndpoints(c); err != nil {
-		c.diag("endpoints: " + err.Error())
+		c.diag("ERROR", "endpoints: "+err.Error())
 	}
 
 	return *c.Delta, nil

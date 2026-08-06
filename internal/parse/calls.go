@@ -15,6 +15,10 @@ func collectCalls(c *Context) {
 			continue
 		}
 		for _, file := range pkg.Syntax {
+			rel := c.relPath(pkg.Fset.Position(file.Pos()).Filename)
+			if !c.allowFile(rel) {
+				continue
+			}
 			var currentFn string
 			ast.Inspect(file, func(n ast.Node) bool {
 				switch x := n.(type) {
@@ -26,18 +30,19 @@ func collectCalls(c *Context) {
 					if x.Recv != nil && len(x.Recv.List) > 0 {
 						recv = typeExprString(x.Recv.List[0].Type)
 					}
-					sig := functionSignature(x.Name.Name, recv, x)
+					sig := functionSignature(x.Name.Name, recv)
 					currentFn = ids.FunctionID(pkg.PkgPath + "." + sig)
 				case *ast.CallExpr:
 					if currentFn == "" {
 						return true
 					}
-					toIDs, callType := resolveCallee(pkg, x)
+					toIDs, callType := resolveCallee(c, pkg, x)
 					line := pkg.Fset.Position(x.Pos()).Line
 					for _, to := range toIDs {
 						if to == "" || to == currentFn {
 							continue
 						}
+						ensurePlaceholderFunction(c, to, rel, line)
 						c.addRel(protocol.CodeRelationship{
 							ID:               ids.RelationshipID(currentFn, protocol.RelCalls, to),
 							FromNodeID:       currentFn,
@@ -56,7 +61,38 @@ func collectCalls(c *Context) {
 	}
 }
 
-func resolveCallee(pkg *packages.Package, ce *ast.CallExpr) (idsOut []string, callType string) {
+func ensurePlaceholderFunction(c *Context, fnID, rel string, line int) {
+	// if already a known function node, skip
+	for _, f := range c.Delta.Functions {
+		if f.ID == fnID {
+			return
+		}
+	}
+	if c.PlaceholderFns[fnID] {
+		return
+	}
+	c.PlaceholderFns[fnID] = true
+	// parse id: fn:pkg.sig
+	name := fnID
+	if len(fnID) > 3 && fnID[:3] == "fn:" {
+		name = fnID[3:]
+	}
+	short := baseIdent(name)
+	c.Delta.Functions = append(c.Delta.Functions, protocol.CodeFunction{
+		ID:              fnID,
+		Name:            short,
+		QualifiedName:   name,
+		Language:        "go",
+		ProjectName:     c.projectName(),
+		ProjectFilePath: rel,
+		Signature:       short,
+		IsPlaceholder:   boolPtr(true),
+		StartLine:       intPtr(line),
+		EndLine:         intPtr(line),
+	})
+}
+
+func resolveCallee(c *Context, pkg *packages.Package, ce *ast.CallExpr) (idsOut []string, callType string) {
 	info := pkg.TypesInfo
 	callType = "direct"
 	if info == nil {
@@ -82,11 +118,10 @@ func resolveCallee(pkg *packages.Package, ce *ast.CallExpr) (idsOut []string, ca
 				return []string{typesFuncID(fn)}, "static"
 			}
 		}
-	case *ast.IndexExpr, *ast.IndexListExpr:
-		// generic instantiation: unwrap
-		if ix, ok := ce.Fun.(*ast.IndexExpr); ok {
-			return resolveCallee(pkg, &ast.CallExpr{Fun: ix.X, Args: ce.Args})
-		}
+	case *ast.IndexExpr:
+		return resolveCallee(c, pkg, &ast.CallExpr{Fun: f.X, Args: ce.Args})
+	case *ast.IndexListExpr:
+		return resolveCallee(c, pkg, &ast.CallExpr{Fun: f.X, Args: ce.Args})
 	}
 	return fallbackCallee(pkg, ce), callType
 }
@@ -114,9 +149,7 @@ func fallbackCallee(pkg *packages.Package, ce *ast.CallExpr) []string {
 	case *ast.Ident:
 		return []string{ids.FunctionID(pkg.PkgPath + "." + f.Name)}
 	case *ast.SelectorExpr:
-		// pkg.Func or x.Method
 		if id, ok := f.X.(*ast.Ident); ok {
-			// could be package name or variable
 			return []string{ids.FunctionID(id.Name + "." + f.Sel.Name)}
 		}
 		return []string{ids.FunctionID(pkg.PkgPath + "." + f.Sel.Name)}

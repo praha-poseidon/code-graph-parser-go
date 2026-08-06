@@ -10,14 +10,20 @@ import (
 
 // Context is shared state while building one GraphDelta.
 type Context struct {
-	Req     protocol.ParseRequest
-	Root    string // absolute project root
-	Pkgs    []*packages.Package
-	Delta   *protocol.GraphDelta
-	// index for structure / call edges
-	UnitByQName map[string]string // qualifiedName -> unit id
-	FuncByQName map[string]string // qualifiedName/signature -> fn id
-	SeenRel     map[string]bool
+	Req  protocol.ParseRequest
+	Root string
+	Pkgs []*packages.Package
+	Delta *protocol.GraphDelta
+
+	UnitByQName map[string]string // pkg.Type -> unit id
+	FuncByQName map[string]string // qualified signature -> fn id
+	// FuncAtFileLine: "rel/path.go:line" -> fn id (for endpoint linking)
+	FuncAtFileLine map[string]string
+	// FileAllow: if non-nil, only emit nodes from these project-relative paths
+	FileAllow map[string]bool
+	SeenRel   map[string]bool
+	// Placeholder functions emitted for external call targets
+	PlaceholderFns map[string]bool
 }
 
 func newContext(req protocol.ParseRequest, root string, pkgs []*packages.Package) *Context {
@@ -27,18 +33,37 @@ func newContext(req protocol.ParseRequest, root string, pkgs []*packages.Package
 	if d.Scope.ProjectName == "" {
 		d.Scope.ProjectName = filepath.Base(root)
 	}
-	return &Context{
-		Req:         req,
-		Root:        root,
-		Pkgs:        pkgs,
-		Delta:       &d,
-		UnitByQName: map[string]string{},
-		FuncByQName: map[string]string{},
-		SeenRel:     map[string]bool{},
+	c := &Context{
+		Req:            req,
+		Root:           root,
+		Pkgs:           pkgs,
+		Delta:          &d,
+		UnitByQName:    map[string]string{},
+		FuncByQName:    map[string]string{},
+		FuncAtFileLine: map[string]string{},
+		SeenRel:        map[string]bool{},
+		PlaceholderFns: map[string]bool{},
 	}
+	if len(req.SourceFiles) > 0 {
+		c.FileAllow = map[string]bool{}
+		for _, f := range req.SourceFiles {
+			c.FileAllow[c.normalizeAllow(f)] = true
+		}
+	}
+	return c
 }
 
 func (c *Context) projectName() string { return c.Delta.Scope.ProjectName }
+
+func (c *Context) normalizeAllow(p string) string {
+	if !filepath.IsAbs(p) {
+		p = filepath.Join(c.Root, p)
+	}
+	if a, err := filepath.Abs(p); err == nil {
+		p = a
+	}
+	return filepath.ToSlash(c.relPath(p))
+}
 
 func (c *Context) relPath(abs string) string {
 	if abs == "" {
@@ -55,6 +80,23 @@ func (c *Context) relPath(abs string) string {
 	return filepath.ToSlash(abs)
 }
 
+func (c *Context) allowFile(rel string) bool {
+	if c.FileAllow == nil {
+		return true
+	}
+	rel = filepath.ToSlash(rel)
+	if c.FileAllow[rel] {
+		return true
+	}
+	// also allow if any allow entry is suffix match
+	for a := range c.FileAllow {
+		if strings.HasSuffix(rel, a) || strings.HasSuffix(a, rel) {
+			return true
+		}
+	}
+	return false
+}
+
 func (c *Context) addRel(rel protocol.CodeRelationship) {
 	if rel.FromNodeID == "" || rel.ToNodeID == "" || rel.RelationshipType == "" {
 		return
@@ -64,9 +106,6 @@ func (c *Context) addRel(rel protocol.CodeRelationship) {
 		return
 	}
 	c.SeenRel[key] = true
-	if rel.ID == "" {
-		// filled by caller via ids package
-	}
 	if rel.Language == "" {
 		rel.Language = "go"
 	}
@@ -76,16 +115,16 @@ func (c *Context) addRel(rel protocol.CodeRelationship) {
 	c.Delta.Relationships = append(c.Delta.Relationships, rel)
 }
 
-func (c *Context) diag(msg string) {
+func (c *Context) diag(level, msg string) {
 	c.Delta.Diagnostics = append(c.Delta.Diagnostics, protocol.Diagnostic{
-		Level:    "ERROR",
-		Severity: "ERROR",
+		Level:    level,
+		Severity: level,
 		Message:  msg,
 	})
 }
 
 func baseIdent(s string) string {
-	s = strings.TrimPrefix(s, "*")
+	s = strings.TrimPrefix(strings.TrimSpace(s), "*")
 	if i := strings.LastIndex(s, "."); i >= 0 {
 		return s[i+1:]
 	}
@@ -93,3 +132,5 @@ func baseIdent(s string) string {
 }
 
 func intPtr(v int) *int { return &v }
+
+func boolPtr(v bool) *bool { return &v }
