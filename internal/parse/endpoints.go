@@ -58,17 +58,25 @@ func attachEndpoints(c *Context) error {
 	for _, f := range facts {
 		method := firstNonEmpty(f.Fields["httpMethod"], f.Fields["method"])
 		path := firstNonEmpty(f.Fields["path"], f.Fields["url"])
-		direction := f.Classifiers["direction"]
+		direction := firstNonEmpty(f.Fields["direction"], f.Classifiers["direction"])
 		if direction == "" {
 			direction = "inbound"
 		}
-		epType := strings.ToUpper(f.Classifiers["category"])
+		epType := strings.ToUpper(firstNonEmpty(f.Fields["endpointType"], f.Classifiers["category"]))
 		if epType == "" {
 			epType = "HTTP"
 		}
-		matchIdentity := strings.TrimSpace(method + " " + path)
-		if matchIdentity == "" {
-			matchIdentity = f.Rule
+		identityValue := endpointIdentityValue(epType, f.Fields)
+		if identityValue == "" {
+			continue
+		}
+		matchIdentity := epType + ":" + identityValue
+		if epType == "HTTP" {
+			method = strings.ToUpper(strings.TrimSpace(method))
+			if method == "" {
+				method = "ANY"
+			}
+			matchIdentity = "HTTP:" + method + ":" + path
 		}
 		id := ids.EndpointID(direction, epType, matchIdentity+"|"+f.ProjectFilePath+"|"+fmt.Sprint(f.StartLine))
 		ep := map[string]any{
@@ -80,18 +88,33 @@ func attachEndpoints(c *Context) error {
 			"projectFilePath": f.ProjectFilePath,
 			"endpointType":    epType,
 			"direction":       direction,
-			"httpMethod":      method,
-			"path":            path,
-			"normalizedPath":  path,
+			"isExternal":      direction == "outbound",
+			"parseLevel":      firstNonEmpty(f.Fields["parseLevel"], "full"),
+			"httpMethod":      optionalWhen(epType == "HTTP", method),
+			"path":            optionalWhen(epType == "HTTP", identityValue),
+			"normalizedPath":  optionalWhen(epType == "HTTP", identityValue),
+			"topic":           optionalString(f.Fields["topic"]),
+			"group":           optionalString(f.Fields["group"]),
+			"operation":       optionalString(f.Fields["operation"]),
+			"brokerType":      optionalString(f.Fields["brokerType"]),
+			"keyPattern":      optionalString(firstNonEmpty(f.Fields["keyPattern"], f.Fields["key"])),
+			"command":         optionalString(f.Fields["command"]),
+			"dataStructure":   optionalString(f.Fields["dataStructure"]),
+			"tableName":       optionalString(firstNonEmpty(f.Fields["tableName"], f.Fields["table"])),
+			"dbOperation":     optionalString(firstNonEmpty(f.Fields["dbOperation"], f.Fields["operation"])),
 			"matchIdentity":   matchIdentity,
 			"startLine":       f.StartLine,
 			"endLine":         f.EndLine,
 			"qualifiedName":   matchIdentity,
+			"other":           optionalString(f.Fields["other"]),
 		}
 		c.Delta.Endpoints = append(c.Delta.Endpoints, ep)
 
 		// Link endpoint ↔ function
-		fnID := handlerByFileLine[f.ProjectFilePath+":"+itoa(f.StartLine)]
+		fnID := endpointHandlerFunction(c, f)
+		if fnID == "" {
+			fnID = handlerByFileLine[f.ProjectFilePath+":"+itoa(f.StartLine)]
+		}
 		if fnID == "" {
 			// try nearby lines
 			for d := 0; d <= 2 && fnID == ""; d++ {
@@ -131,6 +154,62 @@ func attachEndpoints(c *Context) error {
 		}
 	}
 	return nil
+}
+
+func endpointIdentityValue(endpointType string, fields map[string]string) string {
+	switch endpointType {
+	case "HTTP":
+		return strings.TrimSpace(firstNonEmpty(fields["path"], fields["url"], fields["route"]))
+	case "MQ":
+		return strings.TrimSpace(fields["topic"])
+	case "REDIS":
+		return strings.TrimSpace(firstNonEmpty(fields["keyPattern"], fields["key"]))
+	case "DB":
+		return strings.TrimSpace(firstNonEmpty(fields["tableName"], fields["table"]))
+	default:
+		return strings.TrimSpace(firstNonEmpty(fields["path"], fields["topic"], fields["keyPattern"], fields["key"], fields["tableName"], fields["table"]))
+	}
+}
+
+func endpointHandlerFunction(c *Context, fact extractapi.Fact) string {
+	match := func(function protocol.CodeFunction, symbol string) bool {
+		return function.ProjectFilePath == fact.ProjectFilePath &&
+			(function.QualifiedName == symbol || strings.HasSuffix(function.QualifiedName, "."+symbol))
+	}
+	if handler := strings.TrimSpace(fact.Fields["handler"]); handler != "" {
+		var found string
+		for _, function := range c.Delta.Functions {
+			if function.ProjectFilePath == fact.ProjectFilePath && function.Name == handler {
+				if found != "" {
+					return ""
+				}
+				found = function.ID
+			}
+		}
+		return found
+	}
+	if symbol := strings.TrimSpace(fact.EnclosingSymbol); symbol != "" {
+		for _, function := range c.Delta.Functions {
+			if match(function, symbol) {
+				return function.ID
+			}
+		}
+	}
+	return ""
+}
+
+func optionalString(value string) any {
+	if value == "" {
+		return nil
+	}
+	return value
+}
+
+func optionalWhen(include bool, value string) any {
+	if !include {
+		return nil
+	}
+	return optionalString(value)
 }
 
 func firstNonEmpty(ss ...string) string {

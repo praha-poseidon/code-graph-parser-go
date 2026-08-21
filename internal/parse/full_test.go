@@ -1,11 +1,14 @@
 package parse_test
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
+	"github.com/praha-poseidon/code-graph-parser-go/internal/ids"
 	"github.com/praha-poseidon/code-graph-parser-go/internal/parse"
 	"github.com/praha-poseidon/code-graph-parser-go/internal/protocol"
 )
@@ -30,16 +33,58 @@ func TestImplementsAndOverrides(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rt := relTypes(delta)
-	if rt[protocol.RelImplements] == 0 {
-		t.Fatalf("expected IMPLEMENTS, got %v", rt)
+	rels := map[string]protocol.CodeRelationship{}
+	for _, rel := range delta.Relationships {
+		rels[rel.FromNodeID+"|"+rel.RelationshipType+"|"+rel.ToNodeID] = rel
 	}
-	if rt[protocol.RelOverrides] == 0 {
-		t.Fatalf("expected OVERRIDES, got %v", rt)
+	want := []string{
+		"unit:example.com/iface.Person|IMPLEMENTS|unit:example.com/iface.Greeter",
+		"unit:example.com/iface.LoudPerson|IMPLEMENTS|unit:example.com/iface.Greeter",
+		"unit:example.com/iface.LoudPerson|IMPLEMENTS|unit:example.com/iface.Shouter",
+		"unit:example.com/iface.LoudPerson|EXTENDS|unit:example.com/iface.Person",
+		"unit:example.com/iface.Shouter|EXTENDS|unit:example.com/iface.Greeter",
+		"fn:example.com/iface.Person.Greet|OVERRIDES|fn:example.com/iface.Greeter.Greet",
+		"fn:example.com/iface.LoudPerson.Shout|OVERRIDES|fn:example.com/iface.Shouter.Shout",
+		"fn:example.com/iface.EmbeddedChild.Ping|OVERRIDES|fn:example.com/iface.EmbeddedBase.Ping",
+		"unit:example.com/iface.CrossPackageGreeter|IMPLEMENTS|unit:example.com/iface/contract.ExternalGreeter",
+		"fn:example.com/iface.CrossPackageGreeter.ExternalGreet|OVERRIDES|fn:example.com/iface/contract.ExternalGreeter.ExternalGreet",
+		"unit:example.com/iface.PointerPerson|IMPLEMENTS|unit:example.com/iface.PointerGreeter",
+		"fn:example.com/iface.PointerPerson.PointerGreet|OVERRIDES|fn:example.com/iface.PointerGreeter.PointerGreet",
 	}
-	if rt[protocol.RelExtends] == 0 {
-		// LoudPerson embeds Person; Shouter embeds Greeter
-		t.Fatalf("expected EXTENDS (embed), got %v", rt)
+	for _, key := range want {
+		rel, ok := rels[key]
+		if !ok {
+			t.Errorf("missing exact relationship %s", key)
+			continue
+		}
+		parts := strings.Split(key, "|")
+		if expectedID := ids.RelationshipID(parts[0], parts[1], parts[2]); rel.ID != expectedID {
+			t.Errorf("relationship %s has id %s, want %s", key, rel.ID, expectedID)
+		}
+	}
+	for _, forbidden := range []string{
+		"unit:example.com/iface.Almost|IMPLEMENTS|unit:example.com/iface.Partial",
+		"fn:example.com/iface.Almost.First|OVERRIDES|fn:example.com/iface.Partial.First",
+		"fn:example.com/iface.LoudPerson.Greet|OVERRIDES|fn:example.com/iface.Greeter.Greet",
+	} {
+		if _, ok := rels[forbidden]; ok {
+			t.Errorf("unexpected relationship %s", forbidden)
+		}
+	}
+	ids := map[string]bool{}
+	for _, node := range delta.Packages {
+		ids[node.ID] = true
+	}
+	for _, node := range delta.Units {
+		ids[node.ID] = true
+	}
+	for _, node := range delta.Functions {
+		ids[node.ID] = true
+	}
+	for _, rel := range delta.Relationships {
+		if !ids[rel.FromNodeID] || !ids[rel.ToNodeID] {
+			t.Errorf("dangling relationship: %+v", rel)
+		}
 	}
 	// interface methods exist as functions
 	foundIfaceMethod := false
@@ -65,11 +110,12 @@ func TestEndpointToFunction(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	rule := strings.Replace(string(b), "path: path", "path: path\n  other: \"configured-by-ser\"", 1)
 	delta, err := parse.Parse(protocol.ParseRequest{
 		ProjectName: "http",
 		Language:    "go",
 		ProjectRoot: ex,
-		RuleSources: []string{string(b)},
+		RuleSources: []string{rule},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -80,6 +126,11 @@ func TestEndpointToFunction(t *testing.T) {
 	rt := relTypes(delta)
 	if rt[protocol.RelEndpointToFunc] == 0 {
 		t.Fatalf("expected ENDPOINT_TO_FUNCTION, got %v endpoints=%d", rt, len(delta.Endpoints))
+	}
+	for _, endpoint := range delta.Endpoints {
+		if endpoint["other"] != "configured-by-ser" {
+			t.Fatalf("endpoint other=%#v", endpoint["other"])
+		}
 	}
 }
 
@@ -98,6 +149,87 @@ func TestSourceFilesFilter(t *testing.T) {
 	}
 	if len(delta.Functions) == 0 {
 		t.Fatal("expected functions from main.go")
+	}
+	if len(delta.Endpoints) != 0 || len(delta.Diagnostics) != 0 {
+		t.Fatalf("no SER should keep the base graph without endpoint errors: endpoints=%d diagnostics=%v", len(delta.Endpoints), delta.Diagnostics)
+	}
+}
+
+func TestMethodDictionaryMaterializesFourEndpointTypes(t *testing.T) {
+	_, file, _, _ := runtime.Caller(0)
+	root := filepath.Join(filepath.Dir(file), "../../testdata/module")
+	root, _ = filepath.Abs(root)
+	type endpointCase struct {
+		typeName  string
+		direction string
+		field     string
+		value     string
+		identity  string
+	}
+	cases := []endpointCase{
+		{"HTTP", "inbound", "path", "/users", "HTTP:GET:/users"},
+		{"MQ", "outbound", "topic", "users.changed", "MQ:users.changed"},
+		{"REDIS", "inbound", "keyPattern", "user:*", "REDIS:user:*"},
+		{"DB", "outbound", "tableName", "users", "DB:users"},
+	}
+	var rules []string
+	for _, item := range cases {
+		rules = append(rules, fmt.Sprintf(`
+rule "Configured %s"
+endpoint %s %s
+find method User.Greet
+let identity =
+  from method take value
+let handler =
+  from method take name
+build {
+  endpointType: "%s"
+  direction: "%s"
+  method: "GET"
+  %s: identity
+  handler: handler
+  other: "metadata"
+}
+dict {
+  example.com/demo.User.Greet() = %s
+}
+`, item.typeName, item.typeName, item.direction, item.typeName, item.direction, item.field, item.value))
+	}
+	delta, err := parse.Parse(protocol.ParseRequest{
+		ProjectName: "demo",
+		Language:    "go",
+		ProjectRoot: root,
+		RuleSources: rules,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(delta.Endpoints) != len(cases) {
+		t.Fatalf("endpoints=%#v diagnostics=%v", delta.Endpoints, delta.Diagnostics)
+	}
+	byIdentity := map[string]map[string]any{}
+	for _, endpoint := range delta.Endpoints {
+		byIdentity[endpoint["matchIdentity"].(string)] = endpoint
+	}
+	for _, item := range cases {
+		endpoint := byIdentity[item.identity]
+		if endpoint == nil {
+			t.Errorf("missing %s in %#v", item.identity, byIdentity)
+			continue
+		}
+		if endpoint["parseLevel"] != "config" || endpoint["other"] != "metadata" || endpoint["isExternal"] != (item.direction == "outbound") {
+			t.Errorf("endpoint %s=%#v", item.identity, endpoint)
+		}
+		if endpoint[item.field] != item.value {
+			t.Errorf("endpoint %s field %s=%#v", item.identity, item.field, endpoint[item.field])
+		}
+		if item.typeName != "HTTP" && (endpoint["httpMethod"] != nil || endpoint["path"] != nil || endpoint["normalizedPath"] != nil) {
+			t.Errorf("non-HTTP endpoint leaked HTTP fields: %#v", endpoint)
+		}
+	}
+	links := relTypes(delta)
+	if links[protocol.RelEndpointToFunc] != 2 || links[protocol.RelFunctionToEndpoint] != 2 {
+		t.Fatalf("endpoint links=%v", links)
 	}
 }
 

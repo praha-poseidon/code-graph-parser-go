@@ -76,3 +76,8 @@ testdata/                     module, embed, iface fixtures
 ## Optional endpoints
 
 Pass SER in `ParseRequest.ruleSources` (or `--rule` in debug). Without SER you still get the full structure graph.
+
+SER method dictionaries use canonical `import/path.Owner.Method()` keys and
+support `key`, `key.1`, `key.2`, … fan-out. Endpoint materialization supports
+HTTP, MQ, REDIS, and DB identities, preserves nullable `other`, and skips facts
+whose required identity is still empty after all `from`/`fallback` sources.
