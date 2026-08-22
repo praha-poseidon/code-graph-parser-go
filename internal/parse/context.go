@@ -4,15 +4,16 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/praha-poseidon/code-graph-parser-go/internal/gopls"
 	"github.com/praha-poseidon/code-graph-parser-go/internal/protocol"
 	"golang.org/x/tools/go/packages"
 )
 
 // Context is shared state while building one GraphDelta.
 type Context struct {
-	Req  protocol.ParseRequest
-	Root string
-	Pkgs []*packages.Package
+	Req   protocol.ParseRequest
+	Root  string
+	Pkgs  []*packages.Package
 	Delta *protocol.GraphDelta
 
 	UnitByQName map[string]string // pkg.Type -> unit id
@@ -24,6 +25,9 @@ type Context struct {
 	SeenRel   map[string]bool
 	// Placeholder functions emitted for external call targets
 	PlaceholderFns map[string]bool
+	// Gopls is present when the CLI runs in task-scoped streaming mode.
+	Gopls    *gopls.Session
+	GoplsErr error
 }
 
 func newContext(req protocol.ParseRequest, root string, pkgs []*packages.Package) *Context {

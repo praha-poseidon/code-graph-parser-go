@@ -167,13 +167,17 @@ func TestMethodDictionaryMaterializesFourEndpointTypes(t *testing.T) {
 		identity  string
 	}
 	cases := []endpointCase{
-		{"HTTP", "inbound", "path", "/users", "HTTP:GET:/users"},
+		{"HTTP", "inbound", "path", "/users/{userId}", "HTTP:GET:/users/{userId}"},
 		{"MQ", "outbound", "topic", "users.changed", "MQ:users.changed"},
 		{"REDIS", "inbound", "keyPattern", "user:*", "REDIS:user:*"},
 		{"DB", "outbound", "tableName", "users", "DB:users"},
 	}
 	var rules []string
 	for _, item := range cases {
+		extra := ""
+		if item.typeName == "REDIS" {
+			extra = "  command: \"DEL\"\n"
+		}
 		rules = append(rules, fmt.Sprintf(`
 rule "Configured %s"
 endpoint %s %s
@@ -187,13 +191,14 @@ build {
   direction: "%s"
   method: "GET"
   %s: identity
+%s
   handler: handler
   other: "metadata"
 }
 dict {
   example.com/demo.User.Greet() = %s
 }
-`, item.typeName, item.typeName, item.direction, item.typeName, item.direction, item.field, item.value))
+`, item.typeName, item.typeName, item.direction, item.typeName, item.direction, item.field, extra, item.value))
 	}
 	delta, err := parse.Parse(protocol.ParseRequest{
 		ProjectName: "demo",
@@ -222,6 +227,12 @@ dict {
 		}
 		if endpoint[item.field] != item.value {
 			t.Errorf("endpoint %s field %s=%#v", item.identity, item.field, endpoint[item.field])
+		}
+		if item.typeName == "REDIS" && endpoint["command"] != "DELETE" {
+			t.Errorf("Redis DEL was not canonicalized: %#v", endpoint)
+		}
+		if item.typeName == "HTTP" && endpoint["normalizedPath"] != item.value {
+			t.Errorf("parser changed exact HTTP path: endpoint=%#v", endpoint)
 		}
 		if item.typeName != "HTTP" && (endpoint["httpMethod"] != nil || endpoint["path"] != nil || endpoint["normalizedPath"] != nil) {
 			t.Errorf("non-HTTP endpoint leaked HTTP fields: %#v", endpoint)

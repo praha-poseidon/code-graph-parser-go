@@ -98,7 +98,7 @@ func attachEndpoints(c *Context) error {
 			"operation":       optionalString(f.Fields["operation"]),
 			"brokerType":      optionalString(f.Fields["brokerType"]),
 			"keyPattern":      optionalString(firstNonEmpty(f.Fields["keyPattern"], f.Fields["key"])),
-			"command":         optionalString(f.Fields["command"]),
+			"command":         optionalString(canonicalCommand(f.Fields["command"])),
 			"dataStructure":   optionalString(f.Fields["dataStructure"]),
 			"tableName":       optionalString(firstNonEmpty(f.Fields["tableName"], f.Fields["table"])),
 			"dbOperation":     optionalString(firstNonEmpty(f.Fields["dbOperation"], f.Fields["operation"])),
@@ -169,6 +169,14 @@ func endpointIdentityValue(endpointType string, fields map[string]string) string
 	default:
 		return strings.TrimSpace(firstNonEmpty(fields["path"], fields["topic"], fields["keyPattern"], fields["key"], fields["tableName"], fields["table"]))
 	}
+}
+
+func canonicalCommand(command string) string {
+	value := strings.ToUpper(strings.TrimSpace(command))
+	if value == "DEL" {
+		return "DELETE"
+	}
+	return value
 }
 
 func endpointHandlerFunction(c *Context, fact extractapi.Fact) string {

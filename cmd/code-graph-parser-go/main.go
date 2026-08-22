@@ -9,6 +9,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -22,9 +23,18 @@ import (
 
 func main() {
 	stdio := flag.Bool("stdio", false, "process protocol: ParseRequest on stdin → GraphDelta on stdout")
+	stdioStream := flag.Bool("stdio-stream", false, "stream protocol: multiple ParseRequest/GraphDelta JSON lines")
 	project := flag.String("project", "", "debug: parse module at path (pretty JSON to stdout)")
 	rule := flag.String("rule", "", "debug: optional SER file for endpoints")
 	flag.Parse()
+
+	if *stdioStream {
+		if err := runStdioStream(); err != nil {
+			fmt.Fprintln(os.Stderr, err.Error())
+			os.Exit(1)
+		}
+		return
+	}
 
 	if *stdio {
 		if err := runStdio(); err != nil {
@@ -40,12 +50,16 @@ func main() {
       Read one ParseRequest JSON from stdin, write one GraphDelta JSON to stdout.
       Used by code-graph-engine / code-graph-parser-process.
 
+  code-graph-parser-go --stdio-stream
+      Keep one task-local parser/gopls process alive for multiple requests.
+      Input and output are newline-delimited compact JSON.
+
   code-graph-parser-go --project <moduleRoot> [--rule file.ser]
       Local debug (pretty-print GraphDelta).
 
 Engine example:
   -Dcodegraph.parser.process.languages=go
-  -Dcodegraph.parser.process.go.command="/path/to/code-graph-parser-go --stdio"
+  -Dcodegraph.parser.process.go.command="/path/to/code-graph-parser-go --stdio-stream"
 `)
 		os.Exit(2)
 	}
@@ -94,4 +108,42 @@ func runStdio() error {
 	}
 	// compact JSON for process adapter
 	return json.NewEncoder(os.Stdout).Encode(delta)
+}
+
+func runStdioStream() error {
+	decoder := json.NewDecoder(os.Stdin)
+	encoder := json.NewEncoder(os.Stdout)
+	var session *parse.TaskSession
+	defer func() {
+		if session != nil {
+			session.Close()
+		}
+	}()
+
+	for {
+		var req protocol.ParseRequest
+		if err := decoder.Decode(&req); err != nil {
+			if err == io.EOF {
+				return nil
+			}
+			return fmt.Errorf("invalid streaming ParseRequest JSON: %w", err)
+		}
+		if req.Language == "" {
+			req.Language = "go"
+		}
+		if session == nil {
+			var err error
+			session, err = parse.OpenTaskSession(context.Background(), req)
+			if err != nil {
+				return err
+			}
+		}
+		delta, err := session.Parse(req)
+		if err != nil {
+			return err
+		}
+		if err := encoder.Encode(delta); err != nil {
+			return err
+		}
+	}
 }

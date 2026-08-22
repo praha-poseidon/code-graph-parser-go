@@ -17,7 +17,8 @@ Parser 输出里的 `deletedNodeIds` / `deletedRelationshipIds` **固定为空�
 
 ```bash
 -Dcodegraph.parser.process.languages=go
--Dcodegraph.parser.process.go.command="/abs/path/to/code-graph-parser-go --stdio"
+-Dcodegraph.parser.process.go.command="/abs/path/to/code-graph-parser-go --stdio-stream"
+-Dcodegraph.parser.process.go.streaming=true
 -Dcodegraph.parser.process.timeoutSeconds=120
 ```
 
@@ -25,6 +26,25 @@ Parser 输出里的 `deletedNodeIds` / `deletedRelationshipIds` **固定为空�
 
 - stdin：一个 `ParseRequest` JSON  
 - stdout：一个 `GraphDelta` JSON  
+
+### Go 增量类型关系
+
+当 `sourceFiles` 非空时，parser 只通过 `file=<path>` 加载当前文件所属
+package 及其必要依赖。跨 package 的 Go 隐式接口关系由短进程
+每个单文件请求启动一个 `gopls serve`，并在同一 LSP 会话中通过
+`textDocument/implementation` 补齐，包括：
+
+- 具体类型 → 接口的 `IMPLEMENTS`
+- 具体方法 → 接口方法的 `OVERRIDES`
+
+同一 clone 目录下顺序处理的所有文件默认共享：
+
+```text
+<projectRoot>/.codegraph-cache/gopls
+```
+
+分析任务结束删除 clone 目录时，该缓存会一起删除，Engine 无需保存平台级
+索引。开始处理第一个文件前，工作区必须已经处于本次提交的最终状态。
 - 非 0 退出时 stderr 为诊断  
 
 字段对齐 engine model：`relationshipType`、`qualifiedName`、`projectFilePath`、`projectName`、`language` 等。

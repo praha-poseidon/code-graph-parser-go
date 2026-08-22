@@ -33,7 +33,7 @@ func Packages(cfg Config) ([]*packages.Package, error) {
 		patterns = []string{"./..."}
 	}
 
-	roots, err := moduleRoots(abs)
+	roots, err := moduleRoots(abs, patterns)
 	if err != nil {
 		return nil, err
 	}
@@ -54,11 +54,15 @@ func Packages(cfg Config) ([]*packages.Package, error) {
 	var loadErrs []string
 
 	for _, root := range roots {
+		rootPatterns := patternsForRoot(root, roots, patterns)
+		if len(rootPatterns) == 0 {
+			continue
+		}
 		pkgs, err := packages.Load(&packages.Config{
 			Mode:  mode,
 			Dir:   root,
 			Tests: cfg.Tests,
-		}, patterns...)
+		}, rootPatterns...)
 		if err != nil {
 			loadErrs = append(loadErrs, fmt.Sprintf("%s: %v", root, err))
 			continue
@@ -89,13 +93,66 @@ func Packages(cfg Config) ([]*packages.Package, error) {
 	return out, nil
 }
 
+// patternsForRoot keeps file= queries attached to the module that contains
+// the file. This matters for go.work and shallow multi-module repositories:
+// asking every module to load the same absolute file causes avoidable errors
+// and defeats incremental package loading.
+func patternsForRoot(root string, roots, patterns []string) []string {
+	var filePatterns []string
+	var otherPatterns []string
+	for _, pattern := range patterns {
+		if strings.HasPrefix(pattern, "file=") {
+			filename := strings.TrimPrefix(pattern, "file=")
+			if ownerRootForFile(roots, filename) == root {
+				filePatterns = append(filePatterns, pattern)
+			}
+			continue
+		}
+		otherPatterns = append(otherPatterns, pattern)
+	}
+	if len(filePatterns) > 0 {
+		return filePatterns
+	}
+	if hasFilePattern(patterns) {
+		return nil
+	}
+	return otherPatterns
+}
+
+func ownerRootForFile(roots []string, filename string) string {
+	var owner string
+	for _, root := range roots {
+		if pathWithin(root, filename) && len(root) > len(owner) {
+			owner = root
+		}
+	}
+	return owner
+}
+
+func hasFilePattern(patterns []string) bool {
+	for _, pattern := range patterns {
+		if strings.HasPrefix(pattern, "file=") {
+			return true
+		}
+	}
+	return false
+}
+
+func pathWithin(root, filename string) bool {
+	rel, err := filepath.Rel(root, filename)
+	if err != nil {
+		return false
+	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
 func isTestPackagePath(pkgPath string) bool {
 	return strings.HasSuffix(pkgPath, ".test")
 }
 
 // moduleRoots returns directories that contain a go.mod to load.
 // Prefer go.work "use" entries when present.
-func moduleRoots(projectRoot string) ([]string, error) {
+func moduleRoots(projectRoot string, patterns []string) ([]string, error) {
 	work := filepath.Join(projectRoot, "go.work")
 	if st, err := os.Stat(work); err == nil && !st.IsDir() {
 		uses, err := parseGoWorkUses(work, projectRoot)
@@ -105,6 +162,11 @@ func moduleRoots(projectRoot string) ([]string, error) {
 		if len(uses) > 0 {
 			return uses, nil
 		}
+	}
+	// For incremental file= requests, the nearest module owns the file. Check
+	// this before the root go.mod because nested modules intentionally shadow it.
+	if roots := moduleRootsForFiles(projectRoot, patterns); len(roots) > 0 {
+		return roots, nil
 	}
 	// single module or workspace without uses
 	if _, err := os.Stat(filepath.Join(projectRoot, "go.mod")); err == nil {
@@ -129,6 +191,36 @@ func moduleRoots(projectRoot string) ([]string, error) {
 		return []string{projectRoot}, nil
 	}
 	return roots, nil
+}
+
+func moduleRootsForFiles(projectRoot string, patterns []string) []string {
+	seen := map[string]bool{}
+	var roots []string
+	for _, pattern := range patterns {
+		if !strings.HasPrefix(pattern, "file=") {
+			continue
+		}
+		filename := strings.TrimPrefix(pattern, "file=")
+		if !filepath.IsAbs(filename) {
+			filename = filepath.Join(projectRoot, filename)
+		}
+		dir := filepath.Dir(filepath.Clean(filename))
+		for pathWithin(projectRoot, dir) {
+			if st, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil && !st.IsDir() {
+				if !seen[dir] {
+					seen[dir] = true
+					roots = append(roots, dir)
+				}
+				break
+			}
+			parent := filepath.Dir(dir)
+			if parent == dir {
+				break
+			}
+			dir = parent
+		}
+	}
+	return roots
 }
 
 func parseGoWorkUses(workFile, projectRoot string) ([]string, error) {

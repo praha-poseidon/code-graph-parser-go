@@ -31,7 +31,8 @@ go build -o bin/code-graph-parser-go ./cmd/code-graph-parser-go
 
 ```bash
 -Dcodegraph.parser.process.languages=go
--Dcodegraph.parser.process.go.command="/abs/path/code-graph-parser-go --stdio"
+-Dcodegraph.parser.process.go.command="/abs/path/code-graph-parser-go --stdio-stream"
+-Dcodegraph.parser.process.go.streaming=true
 ```
 
 ## GraphDelta coverage
@@ -49,9 +50,55 @@ go build -o bin/code-graph-parser-go ./cmd/code-graph-parser-go
 | OVERRIDES (interface methods + embed shadow) | yes |
 | Endpoints (`ruleSources` → static-extract-go) | yes |
 | ENDPOINT_TO_FUNCTION / FUNCTION_TO_ENDPOINT | yes |
-| 按 `sourceFiles` 产出本次增量涉及的节点 | yes（类型解析仍 load 模块） |
+| 按 `sourceFiles` 产出本次增量涉及的节点 | yes（只 load 当前 package + 必要依赖） |
 | 删除节点/关系 | **否 — 引擎**（`SOURCE_DELETED` 等） |
 | MATCHES 跨服务匹配 | **否 — 引擎** |
+
+## Go incremental implementation lookup (gopls)
+
+Incremental requests (`sourceFiles` is non-empty) load only the package that
+contains the changed file, using the `go/packages` `file=<path>` query. Global
+implicit interface relationships are supplied by the official `gopls` LSP
+`textDocument/implementation` request.
+
+Install `gopls` beside the Go toolchain used by the parser:
+
+```bash
+# This version is compatible with the repository's Go 1.23.6 toolchain.
+go install golang.org/x/tools/gopls@v0.18.1
+```
+
+When the deployment toolchain is upgraded, pin a newer compatible gopls
+version instead of using an unpinned `@latest` during packaging.
+The supplied wrapper includes both `~/.local/go/bin` and the default
+`~/go/bin` in `PATH`.
+
+All sequential file requests for the same cloned project share this default
+task-local cache:
+
+```text
+<projectRoot>/.codegraph-cache/gopls
+```
+
+Deleting the cloned project therefore deletes the gopls cache too. The Engine
+opens one task-local parser session before its sequential file loop. That
+session owns one `gopls serve` process and reuses the same in-memory LSP
+snapshot and disk cache for every file. Closing the task session stops both
+the parser and gopls processes before the cloned project is deleted.
+
+Optional `ParseRequest.options`:
+
+| option | default | purpose |
+| --- | --- | --- |
+| `goplsEnabled` | `true` for incremental requests | enable global implementation lookup |
+| `goplsCommand` | `CODEGRAPH_GOPLS_COMMAND` or `gopls` | executable path |
+| `goplsCacheDir` | `<projectRoot>/.codegraph-cache/gopls` | task-local shared cache directory |
+| `goplsConcurrency` | `4` | maximum parallel LSP requests inside the task-local gopls process |
+| `goplsRequired` | `false` | return an error diagnostic when gopls is unavailable |
+
+When gopls is unavailable and not required, the parser keeps local-package
+`go/types` relationships and sets `scope.attributes.goplsImplementation` to
+`unavailable`.
 
 IDs / `relationshipType` names match Java `GraphIds` + `RelationshipType` enum.
 
@@ -62,6 +109,7 @@ cmd/code-graph-parser-go/     CLI --stdio
 internal/protocol/            ParseRequest / GraphDelta
 internal/ids/                 GraphIds-compatible
 internal/load/                go/packages
+internal/gopls/               task-local reusable LSP implementation client
 internal/parse/
   parse.go                    pipeline orchestrator
   nodes.go                    packages / units / functions
