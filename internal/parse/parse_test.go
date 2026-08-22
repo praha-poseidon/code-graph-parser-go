@@ -23,12 +23,12 @@ func TestEmbedEmitsExtends(t *testing.T) {
 	}
 	found := false
 	for _, r := range delta.Relationships {
-		if r.RelationshipType == protocol.RelExtends {
+		if r.RelationshipType == protocol.RelEmbeds {
 			found = true
 			break
 		}
 	}
 	if !found {
-		t.Fatalf("expected EXTENDS, rels=%d", len(delta.Relationships))
+		t.Fatalf("expected GO_EMBEDS, rels=%d", len(delta.Relationships))
 	}
 }

@@ -43,14 +43,15 @@ type DeltaScope struct {
 	Attributes  map[string]any `json:"attributes,omitempty"`
 }
 
-// Relationship type names must match Java RelationshipType enum.
+// Shared relationship names are cross-language protocol vocabulary. Go-specific
+// structural names stay native and are classified through RelationshipKind.
 const (
 	RelCalls              = "CALLS"
 	RelPackageToUnit      = "PACKAGE_TO_UNIT"
 	RelUnitToFunction     = "UNIT_TO_FUNCTION"
-	RelExtends            = "EXTENDS"
-	RelImplements         = "IMPLEMENTS"
-	RelOverrides          = "OVERRIDES"
+	RelEmbeds             = "GO_EMBEDS"
+	RelSatisfies          = "GO_SATISFIES"
+	RelMethodSatisfies    = "GO_METHOD_SATISFIES"
 	RelEndpointToFunc     = "ENDPOINT_TO_FUNCTION"
 	RelFunctionToEndpoint = "FUNCTION_TO_ENDPOINT"
 )
@@ -110,10 +111,36 @@ type CodeRelationship struct {
 	FromNodeID       string `json:"fromNodeId"`
 	ToNodeID         string `json:"toNodeId"`
 	RelationshipType string `json:"relationshipType"`
+	RelationshipKind string `json:"relationshipKind"`
+	FromNodeType     string `json:"fromNodeType"`
+	ToNodeType       string `json:"toNodeType"`
 	LineNumber       *int   `json:"lineNumber,omitempty"`
 	CallType         string `json:"callType,omitempty"`
 	Language         string `json:"language"`
 	ProjectName      string `json:"projectName"`
+}
+
+func RelationshipContract(relationshipType string) (kind, fromNodeType, toNodeType string) {
+	switch relationshipType {
+	case RelCalls:
+		return "CALL", "CodeFunction", "CodeFunction"
+	case RelPackageToUnit:
+		return "CONTAINS", "CodePackage", "CodeUnit"
+	case RelUnitToFunction:
+		return "CONTAINS", "CodeUnit", "CodeFunction"
+	case RelEmbeds:
+		return "EMBEDS", "CodeUnit", "CodeUnit"
+	case RelSatisfies:
+		return "CONFORMS", "CodeUnit", "CodeUnit"
+	case RelMethodSatisfies:
+		return "REFINES", "CodeFunction", "CodeFunction"
+	case RelEndpointToFunc:
+		return "BINDS_ENDPOINT", "CodeEndpoint", "CodeFunction"
+	case RelFunctionToEndpoint:
+		return "BINDS_ENDPOINT", "CodeFunction", "CodeEndpoint"
+	default:
+		return "", "", ""
+	}
 }
 
 type Diagnostic struct {

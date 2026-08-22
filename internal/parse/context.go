@@ -116,6 +116,9 @@ func (c *Context) addRel(rel protocol.CodeRelationship) {
 	if rel.ProjectName == "" {
 		rel.ProjectName = c.projectName()
 	}
+	if rel.RelationshipKind == "" || rel.FromNodeType == "" || rel.ToNodeType == "" {
+		rel.RelationshipKind, rel.FromNodeType, rel.ToNodeType = protocol.RelationshipContract(rel.RelationshipType)
+	}
 	c.Delta.Relationships = append(c.Delta.Relationships, rel)
 }
 

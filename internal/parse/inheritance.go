@@ -9,10 +9,10 @@ import (
 	"golang.org/x/tools/go/packages"
 )
 
-// collectInheritance emits EXTENDS / IMPLEMENTS for Go types.
+// collectInheritance emits GO_EMBEDS for Go types.
 // Go has no class extends; we map:
-//   - struct embedding named types → EXTENDS (composition-as-embed)
-//   - named interface embedding → EXTENDS
+//   - struct embedding named types → GO_EMBEDS
+//   - named interface embedding → GO_EMBEDS
 //   - concrete type implementing interface (method set) is expensive; v1: interface embeds only + explicit embedding
 func collectInheritance(c *Context) {
 	for _, pkg := range c.Pkgs {
@@ -43,10 +43,10 @@ func collectInheritance(c *Context) {
 						continue
 					}
 					c.addRel(protocol.CodeRelationship{
-						ID:               ids.RelationshipID(fromID, protocol.RelExtends, toID),
+						ID:               ids.RelationshipID(fromID, protocol.RelEmbeds, toID),
 						FromNodeID:       fromID,
 						ToNodeID:         toID,
-						RelationshipType: protocol.RelExtends,
+						RelationshipType: protocol.RelEmbeds,
 						Language:         "go",
 						ProjectName:      c.projectName(),
 						CallType:         "embed",
@@ -59,10 +59,10 @@ func collectInheritance(c *Context) {
 						continue
 					}
 					c.addRel(protocol.CodeRelationship{
-						ID:               ids.RelationshipID(fromID, protocol.RelExtends, toID),
+						ID:               ids.RelationshipID(fromID, protocol.RelEmbeds, toID),
 						FromNodeID:       fromID,
 						ToNodeID:         toID,
-						RelationshipType: protocol.RelExtends,
+						RelationshipType: protocol.RelEmbeds,
 						Language:         "go",
 						ProjectName:      c.projectName(),
 						CallType:         "embed",
@@ -93,10 +93,10 @@ func collectInheritance(c *Context) {
 							continue
 						}
 						c.addRel(protocol.CodeRelationship{
-							ID:               ids.RelationshipID(fromID, protocol.RelExtends, toID),
+							ID:               ids.RelationshipID(fromID, protocol.RelEmbeds, toID),
 							FromNodeID:       fromID,
 							ToNodeID:         toID,
-							RelationshipType: protocol.RelExtends,
+							RelationshipType: protocol.RelEmbeds,
 							Language:         "go",
 							ProjectName:      c.projectName(),
 						})
@@ -112,10 +112,10 @@ func collectInheritance(c *Context) {
 							continue
 						}
 						c.addRel(protocol.CodeRelationship{
-							ID:               ids.RelationshipID(fromID, protocol.RelExtends, toID),
+							ID:               ids.RelationshipID(fromID, protocol.RelEmbeds, toID),
 							FromNodeID:       fromID,
 							ToNodeID:         toID,
-							RelationshipType: protocol.RelExtends,
+							RelationshipType: protocol.RelEmbeds,
 							Language:         "go",
 							ProjectName:      c.projectName(),
 						})

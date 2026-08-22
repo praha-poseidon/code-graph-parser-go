@@ -38,18 +38,18 @@ func TestImplementsAndOverrides(t *testing.T) {
 		rels[rel.FromNodeID+"|"+rel.RelationshipType+"|"+rel.ToNodeID] = rel
 	}
 	want := []string{
-		"unit:example.com/iface.Person|IMPLEMENTS|unit:example.com/iface.Greeter",
-		"unit:example.com/iface.LoudPerson|IMPLEMENTS|unit:example.com/iface.Greeter",
-		"unit:example.com/iface.LoudPerson|IMPLEMENTS|unit:example.com/iface.Shouter",
-		"unit:example.com/iface.LoudPerson|EXTENDS|unit:example.com/iface.Person",
-		"unit:example.com/iface.Shouter|EXTENDS|unit:example.com/iface.Greeter",
-		"fn:example.com/iface.Person.Greet|OVERRIDES|fn:example.com/iface.Greeter.Greet",
-		"fn:example.com/iface.LoudPerson.Shout|OVERRIDES|fn:example.com/iface.Shouter.Shout",
-		"fn:example.com/iface.EmbeddedChild.Ping|OVERRIDES|fn:example.com/iface.EmbeddedBase.Ping",
-		"unit:example.com/iface.CrossPackageGreeter|IMPLEMENTS|unit:example.com/iface/contract.ExternalGreeter",
-		"fn:example.com/iface.CrossPackageGreeter.ExternalGreet|OVERRIDES|fn:example.com/iface/contract.ExternalGreeter.ExternalGreet",
-		"unit:example.com/iface.PointerPerson|IMPLEMENTS|unit:example.com/iface.PointerGreeter",
-		"fn:example.com/iface.PointerPerson.PointerGreet|OVERRIDES|fn:example.com/iface.PointerGreeter.PointerGreet",
+		"unit:example.com/iface.Person|GO_SATISFIES|unit:example.com/iface.Greeter",
+		"unit:example.com/iface.LoudPerson|GO_SATISFIES|unit:example.com/iface.Greeter",
+		"unit:example.com/iface.LoudPerson|GO_SATISFIES|unit:example.com/iface.Shouter",
+		"unit:example.com/iface.LoudPerson|GO_EMBEDS|unit:example.com/iface.Person",
+		"unit:example.com/iface.Shouter|GO_EMBEDS|unit:example.com/iface.Greeter",
+		"fn:example.com/iface.Person.Greet|GO_METHOD_SATISFIES|fn:example.com/iface.Greeter.Greet",
+		"fn:example.com/iface.LoudPerson.Shout|GO_METHOD_SATISFIES|fn:example.com/iface.Shouter.Shout",
+		"fn:example.com/iface.EmbeddedChild.Ping|GO_METHOD_SATISFIES|fn:example.com/iface.EmbeddedBase.Ping",
+		"unit:example.com/iface.CrossPackageGreeter|GO_SATISFIES|unit:example.com/iface/contract.ExternalGreeter",
+		"fn:example.com/iface.CrossPackageGreeter.ExternalGreet|GO_METHOD_SATISFIES|fn:example.com/iface/contract.ExternalGreeter.ExternalGreet",
+		"unit:example.com/iface.PointerPerson|GO_SATISFIES|unit:example.com/iface.PointerGreeter",
+		"fn:example.com/iface.PointerPerson.PointerGreet|GO_METHOD_SATISFIES|fn:example.com/iface.PointerGreeter.PointerGreet",
 	}
 	for _, key := range want {
 		rel, ok := rels[key]
@@ -61,11 +61,17 @@ func TestImplementsAndOverrides(t *testing.T) {
 		if expectedID := ids.RelationshipID(parts[0], parts[1], parts[2]); rel.ID != expectedID {
 			t.Errorf("relationship %s has id %s, want %s", key, rel.ID, expectedID)
 		}
+		expectedKind, expectedFrom, expectedTo := protocol.RelationshipContract(parts[1])
+		if rel.RelationshipKind != expectedKind || rel.FromNodeType != expectedFrom || rel.ToNodeType != expectedTo {
+			t.Errorf("relationship %s has contract %s/%s/%s, want %s/%s/%s",
+				key, rel.RelationshipKind, rel.FromNodeType, rel.ToNodeType,
+				expectedKind, expectedFrom, expectedTo)
+		}
 	}
 	for _, forbidden := range []string{
-		"unit:example.com/iface.Almost|IMPLEMENTS|unit:example.com/iface.Partial",
-		"fn:example.com/iface.Almost.First|OVERRIDES|fn:example.com/iface.Partial.First",
-		"fn:example.com/iface.LoudPerson.Greet|OVERRIDES|fn:example.com/iface.Greeter.Greet",
+		"unit:example.com/iface.Almost|GO_SATISFIES|unit:example.com/iface.Partial",
+		"fn:example.com/iface.Almost.First|GO_METHOD_SATISFIES|fn:example.com/iface.Partial.First",
+		"fn:example.com/iface.LoudPerson.Greet|GO_METHOD_SATISFIES|fn:example.com/iface.Greeter.Greet",
 	} {
 		if _, ok := rels[forbidden]; ok {
 			t.Errorf("unexpected relationship %s", forbidden)

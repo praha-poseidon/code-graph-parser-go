@@ -7,7 +7,7 @@ import (
 	"github.com/praha-poseidon/code-graph-parser-go/internal/protocol"
 )
 
-// collectImplements emits IMPLEMENTS: concrete named type → interface it fully implements.
+// collectImplements emits GO_SATISFIES: concrete named type → interface it fully satisfies.
 func collectImplements(c *Context) {
 	// gather all interface named types in loaded packages
 	type named struct {
@@ -65,10 +65,10 @@ func collectImplements(c *Context) {
 			}
 			if types.Implements(t, iface.iface) || types.Implements(ptr, iface.iface) {
 				c.addRel(protocol.CodeRelationship{
-					ID:               ids.RelationshipID(fromID, protocol.RelImplements, toID),
+					ID:               ids.RelationshipID(fromID, protocol.RelSatisfies, toID),
 					FromNodeID:       fromID,
 					ToNodeID:         toID,
-					RelationshipType: protocol.RelImplements,
+					RelationshipType: protocol.RelSatisfies,
 					Language:         "go",
 					ProjectName:      c.projectName(),
 				})

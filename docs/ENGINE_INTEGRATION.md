@@ -34,8 +34,8 @@ package 及其必要依赖。跨 package 的 Go 隐式接口关系由任务级�
 复用同一个 `gopls serve`，并在同一 LSP 会话中通过
 `textDocument/implementation` 补齐，包括：
 
-- 具体类型 → 接口的 `IMPLEMENTS`
-- 具体方法 → 接口方法的 `OVERRIDES`
+- 具体类型 → 接口的 `GO_SATISFIES`
+- 具体方法 → 接口方法的 `GO_METHOD_SATISFIES`
 
 同一 clone 目录下顺序处理的所有文件默认共享：
 

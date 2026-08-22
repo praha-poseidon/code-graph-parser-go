@@ -158,15 +158,15 @@ func emitGoplsImplementation(c *Context, query, result graphDeclaration) {
 	} else if !query.Interface && result.Interface {
 		implementation, contract = query, result
 	} else {
-		// Interface-to-interface relationships remain EXTENDS and are emitted
+		// Interface-to-interface relationships remain GO_EMBEDS and are emitted
 		// from explicit embedding by collectInheritance.
 		return
 	}
 
-	relType := protocol.RelImplements
+	relType := protocol.RelSatisfies
 	callType := ""
 	if query.Kind == declarationMethod {
-		relType = protocol.RelOverrides
+		relType = protocol.RelMethodSatisfies
 		callType = "interface"
 	}
 	c.addRel(protocol.CodeRelationship{

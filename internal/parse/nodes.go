@@ -66,7 +66,7 @@ func collectPackagesUnitsFunctions(c *Context) {
 			})
 		}
 
-		// Interface methods as function nodes (for OVERRIDES / IMPLEMENTS method links)
+		// Interface methods as function nodes for GO_METHOD_SATISFIES links.
 		emitInterfaceMethodsFromTypes(c, pkg, pkgID)
 	}
 }
@@ -267,7 +267,7 @@ func ensurePackageUnit(c *Context, pkg *packages.Package, pkgID, rel, synthQ str
 	return synthID
 }
 
-// emitInterfaceMethodsFromTypes adds CodeFunction nodes for interface methods so OVERRIDES can target them.
+// emitInterfaceMethodsFromTypes adds CodeFunction nodes for interface methods so GO_METHOD_SATISFIES can target them.
 func emitInterfaceMethodsFromTypes(c *Context, pkg *packages.Package, pkgID string) {
 	if pkg.Types == nil {
 		return

@@ -7,7 +7,7 @@ import (
 	"github.com/praha-poseidon/code-graph-parser-go/internal/protocol"
 )
 
-// collectOverrides emits OVERRIDES for methods that provide an implementation
+// collectOverrides emits GO_METHOD_SATISFIES for methods that satisfy
 // of a fully satisfied interface and for methods that shadow an embedded type.
 // Go does not have an override keyword, so a same-name/same-signature method is
 // not sufficient evidence by itself: the receiver must implement the complete
@@ -115,10 +115,10 @@ func emitInterfaceOverrides(c *Context, pkgPath string, tn *types.TypeName, inte
 				continue
 			}
 			c.addRel(protocol.CodeRelationship{
-				ID:               ids.RelationshipID(fromID, protocol.RelOverrides, contract.fnID),
+				ID:               ids.RelationshipID(fromID, protocol.RelMethodSatisfies, contract.fnID),
 				FromNodeID:       fromID,
 				ToNodeID:         contract.fnID,
-				RelationshipType: protocol.RelOverrides,
+				RelationshipType: protocol.RelMethodSatisfies,
 				Language:         "go",
 				ProjectName:      c.projectName(),
 				CallType:         "interface",
@@ -158,10 +158,10 @@ func emitEmbeddedMethodOverrides(c *Context, pkgPath string, tn *types.TypeName)
 				continue
 			}
 			c.addRel(protocol.CodeRelationship{
-				ID:               ids.RelationshipID(fromID, protocol.RelOverrides, toID),
+				ID:               ids.RelationshipID(fromID, protocol.RelMethodSatisfies, toID),
 				FromNodeID:       fromID,
 				ToNodeID:         toID,
-				RelationshipType: protocol.RelOverrides,
+				RelationshipType: protocol.RelMethodSatisfies,
 				Language:         "go",
 				ProjectName:      c.projectName(),
 				CallType:         "embed-shadow",

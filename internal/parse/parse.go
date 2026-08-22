@@ -10,9 +10,9 @@
 // Pipeline:
 //  1. packages / units / functions + PACKAGE_TO_UNIT / UNIT_TO_FUNCTION
 //  2. CALLS (+ placeholder functions for external targets)
-//  3. EXTENDS (struct/interface embed)
-//  4. IMPLEMENTS (types.Implements)
-//  5. OVERRIDES (interface methods + embed shadow)
+//  3. GO_EMBEDS (struct/interface embed)
+//  4. GO_SATISFIES (types.Implements)
+//  5. GO_METHOD_SATISFIES (interface methods + embed shadow)
 //  6. endpoints from ruleSources + ENDPOINT_TO_FUNCTION / FUNCTION_TO_ENDPOINT
 package parse
 

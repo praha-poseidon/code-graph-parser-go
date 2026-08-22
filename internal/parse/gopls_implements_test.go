@@ -83,11 +83,11 @@ exec %q -test.run='^TestGoplsLSPHelper$'
 		}
 		assertRelationship(t, delta,
 			"unit:example.com/incremental/impl.UserService",
-			protocol.RelImplements,
+			protocol.RelSatisfies,
 			"unit:example.com/incremental/contract.Service")
 		assertRelationship(t, delta,
 			"fn:example.com/incremental/impl.UserService.Save",
-			protocol.RelOverrides,
+			protocol.RelMethodSatisfies,
 			"fn:example.com/incremental/contract.Service.Save")
 
 		// file= incremental loading must not emit the other package's nodes.

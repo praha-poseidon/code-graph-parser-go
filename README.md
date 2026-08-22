@@ -45,9 +45,9 @@ go build -o bin/parser-go ./cmd/parser-go
 | PACKAGE_TO_UNIT | yes |
 | UNIT_TO_FUNCTION | yes |
 | CALLS (types.Info + placeholders) | yes |
-| EXTENDS (struct/interface embed) | yes |
-| IMPLEMENTS (`types.Implements`) | yes |
-| OVERRIDES (interface methods + embed shadow) | yes |
+| GO_EMBEDS (struct/interface embed) | yes |
+| GO_SATISFIES (`types.Implements`) | yes |
+| GO_METHOD_SATISFIES (interface methods + embed shadow) | yes |
 | Endpoints (`ruleSources` → static-extract-go) | yes |
 | ENDPOINT_TO_FUNCTION / FUNCTION_TO_ENDPOINT | yes |
 | 按 `sourceFiles` 产出本次增量涉及的节点 | yes（只 load 当前 package + 必要依赖） |
@@ -114,9 +114,9 @@ internal/parse/
   parse.go                    pipeline orchestrator
   nodes.go                    packages / units / functions
   calls.go                    CALLS + placeholders
-  inheritance.go              EXTENDS (embed)
-  implements.go               IMPLEMENTS
-  overrides.go                OVERRIDES
+  inheritance.go              GO_EMBEDS
+  implements.go               GO_SATISFIES
+  overrides.go                GO_METHOD_SATISFIES
   endpoints.go                SER endpoints + links
 testdata/                     module, embed, iface fixtures
 ```
