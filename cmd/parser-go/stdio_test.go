@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -10,6 +11,30 @@ import (
 	"github.com/praha-poseidon/code-graph-parser-go/internal/parse"
 	"github.com/praha-poseidon/code-graph-parser-go/internal/protocol"
 )
+
+func TestDiagnosticUsesEngineProtocolFields(t *testing.T) {
+	delta, err := parse.Parse(protocol.ParseRequest{ProjectName: "demo", Language: "go"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(delta.Diagnostics) != 1 {
+		t.Fatalf("diagnostics=%#v", delta.Diagnostics)
+	}
+	payload, err := json.Marshal(delta.Diagnostics[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, legacy := range [][]byte{[]byte(`"severity"`), []byte(`"attributes"`)} {
+		if bytes.Contains(payload, legacy) {
+			t.Fatalf("legacy diagnostic field in %s", payload)
+		}
+	}
+	for _, required := range [][]byte{[]byte(`"level":"ERROR"`), []byte(`"code":"request.projectRoot.required"`), []byte(`"message":"projectRoot is required"`), []byte(`"details":{}`)} {
+		if !bytes.Contains(payload, required) {
+			t.Fatalf("missing standard diagnostic field %s in %s", required, payload)
+		}
+	}
+}
 
 func TestParseDemoModuleHasStructureAndRels(t *testing.T) {
 	_, file, _, _ := runtime.Caller(0)

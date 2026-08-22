@@ -8,7 +8,7 @@ Same role as **code-graph-parser-js**:
 引擎发增量 ParseRequest（含 sourceFiles / changeType）
         │
         ▼
-code-graph-parser-go --stdio
+parser-go --stdio
   只解析这次相关源码 → 产出本次 GraphDelta（节点+关系）
   deletedNodeIds / deletedRelationshipIds 保持空（删除由引擎做）
         │
@@ -23,7 +23,7 @@ code-graph-engine 合并/落库/删除/级联
 ```bash
 export PATH="$HOME/.local/go/bin:$PATH"
 go test ./...
-go build -o bin/code-graph-parser-go ./cmd/code-graph-parser-go
+go build -o bin/parser-go ./cmd/parser-go
 ./scripts/smoke-stdio.sh
 ```
 
@@ -31,7 +31,7 @@ go build -o bin/code-graph-parser-go ./cmd/code-graph-parser-go
 
 ```bash
 -Dcodegraph.parser.process.languages=go
--Dcodegraph.parser.process.go.command="/abs/path/code-graph-parser-go --stdio-stream"
+-Dcodegraph.parser.process.go.command="/abs/path/parser-go --stdio-stream"
 -Dcodegraph.parser.process.go.streaming=true
 ```
 
@@ -105,7 +105,7 @@ IDs / `relationshipType` names match Java `GraphIds` + `RelationshipType` enum.
 ## Layout
 
 ```text
-cmd/code-graph-parser-go/     CLI --stdio
+cmd/parser-go/                CLI --stdio
 internal/protocol/            ParseRequest / GraphDelta
 internal/ids/                 GraphIds-compatible
 internal/load/                go/packages

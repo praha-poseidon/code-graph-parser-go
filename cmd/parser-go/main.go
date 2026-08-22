@@ -1,4 +1,4 @@
-// code-graph-parser-go is the Go language process parser for code-graph-engine.
+// parser-go is the Go language process parser for code-graph-engine.
 //
 // Java does not parse Go. This CLI is invoked by code-graph-parser-process:
 //
@@ -46,20 +46,20 @@ func main() {
 
 	if *project == "" {
 		fmt.Fprintf(os.Stderr, `Usage:
-  code-graph-parser-go --stdio
+  parser-go --stdio
       Read one ParseRequest JSON from stdin, write one GraphDelta JSON to stdout.
       Used by code-graph-engine / code-graph-parser-process.
 
-  code-graph-parser-go --stdio-stream
+  parser-go --stdio-stream
       Keep one task-local parser/gopls process alive for multiple requests.
       Input and output are newline-delimited compact JSON.
 
-  code-graph-parser-go --project <moduleRoot> [--rule file.ser]
+  parser-go --project <moduleRoot> [--rule file.ser]
       Local debug (pretty-print GraphDelta).
 
 Engine example:
   -Dcodegraph.parser.process.languages=go
-  -Dcodegraph.parser.process.go.command="/path/to/code-graph-parser-go --stdio-stream"
+  -Dcodegraph.parser.process.go.command="/path/to/parser-go --stdio-stream"
 `)
 		os.Exit(2)
 	}

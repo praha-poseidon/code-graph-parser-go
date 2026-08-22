@@ -17,7 +17,7 @@ Parser 输出里的 `deletedNodeIds` / `deletedRelationshipIds` **固定为空�
 
 ```bash
 -Dcodegraph.parser.process.languages=go
--Dcodegraph.parser.process.go.command="/abs/path/to/code-graph-parser-go --stdio-stream"
+-Dcodegraph.parser.process.go.command="/abs/path/to/parser-go --stdio-stream"
 -Dcodegraph.parser.process.go.streaming=true
 -Dcodegraph.parser.process.timeoutSeconds=120
 ```
@@ -30,8 +30,8 @@ Parser 输出里的 `deletedNodeIds` / `deletedRelationshipIds` **固定为空�
 ### Go 增量类型关系
 
 当 `sourceFiles` 非空时，parser 只通过 `file=<path>` 加载当前文件所属
-package 及其必要依赖。跨 package 的 Go 隐式接口关系由短进程
-每个单文件请求启动一个 `gopls serve`，并在同一 LSP 会话中通过
+package 及其必要依赖。跨 package 的 Go 隐式接口关系由任务级短进程
+复用同一个 `gopls serve`，并在同一 LSP 会话中通过
 `textDocument/implementation` 补齐，包括：
 
 - 具体类型 → 接口的 `IMPLEMENTS`

@@ -20,12 +20,12 @@ type ParseRequest struct {
 
 // GraphDelta is stdout JSON consumed by the Java engine.
 type GraphDelta struct {
-	Scope                  DeltaScope         `json:"scope"`
-	Packages               []CodePackage      `json:"packages"`
-	Units                  []CodeUnit         `json:"units"`
-	Functions              []CodeFunction     `json:"functions"`
-	Endpoints              []map[string]any   `json:"endpoints"`
-	Relationships          []CodeRelationship `json:"relationships"`
+	Scope         DeltaScope         `json:"scope"`
+	Packages      []CodePackage      `json:"packages"`
+	Units         []CodeUnit         `json:"units"`
+	Functions     []CodeFunction     `json:"functions"`
+	Endpoints     []map[string]any   `json:"endpoints"`
+	Relationships []CodeRelationship `json:"relationships"`
 	// Deleted* must remain empty from this parser. The engine owns delete/cascade.
 	DeletedNodeIds         []string     `json:"deletedNodeIds"`
 	DeletedRelationshipIds []string     `json:"deletedRelationshipIds"`
@@ -45,13 +45,13 @@ type DeltaScope struct {
 
 // Relationship type names must match Java RelationshipType enum.
 const (
-	RelCalls            = "CALLS"
-	RelPackageToUnit    = "PACKAGE_TO_UNIT"
-	RelUnitToFunction   = "UNIT_TO_FUNCTION"
-	RelExtends          = "EXTENDS"
-	RelImplements       = "IMPLEMENTS"
-	RelOverrides        = "OVERRIDES"
-	RelEndpointToFunc   = "ENDPOINT_TO_FUNCTION"
+	RelCalls              = "CALLS"
+	RelPackageToUnit      = "PACKAGE_TO_UNIT"
+	RelUnitToFunction     = "UNIT_TO_FUNCTION"
+	RelExtends            = "EXTENDS"
+	RelImplements         = "IMPLEMENTS"
+	RelOverrides          = "OVERRIDES"
+	RelEndpointToFunc     = "ENDPOINT_TO_FUNCTION"
 	RelFunctionToEndpoint = "FUNCTION_TO_ENDPOINT"
 )
 
@@ -122,9 +122,7 @@ type Diagnostic struct {
 	Message         string         `json:"message"`
 	ProjectFilePath string         `json:"projectFilePath,omitempty"`
 	LineNumber      *int           `json:"lineNumber,omitempty"`
-	Attributes      map[string]any `json:"attributes,omitempty"`
-	// Compatibility with earlier smoke scripts
-	Severity string `json:"severity,omitempty"`
+	Details         map[string]any `json:"details"`
 }
 
 func EmptyDelta(req ParseRequest) GraphDelta {

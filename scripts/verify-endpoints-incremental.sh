@@ -4,7 +4,7 @@ export PATH="${HOME}/.local/go/bin:${PATH}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 go test ./...
-go build -o bin/code-graph-parser-go ./cmd/code-graph-parser-go
+go build -o bin/parser-go ./cmd/parser-go
 WORKDIR=$(mktemp -d)
 trap 'rm -rf "$WORKDIR"' EXIT
 mkdir -p "$WORKDIR/proj"
@@ -39,7 +39,7 @@ build {
 EOF
 SER=$(python3 -c "import json; print(json.dumps(open('$WORKDIR/rule.ser').read()))")
 run() {
-  printf '%s' "$1" | ./bin/code-graph-parser-go --stdio
+  printf '%s' "$1" | ./bin/parser-go --stdio
 }
 echo "[1] full + 3 endpoints + e2f"
 OUT=$(run "{\"projectName\":\"v\",\"language\":\"go\",\"projectRoot\":\"$WORKDIR/proj\",\"ruleSources\":[$SER]}")

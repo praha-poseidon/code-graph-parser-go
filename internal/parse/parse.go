@@ -100,7 +100,7 @@ func parse(req protocol.ParseRequest, goplsSession *gopls.Session, goplsErr erro
 	if root == "" {
 		d := protocol.EmptyDelta(req)
 		d.Diagnostics = append(d.Diagnostics, protocol.Diagnostic{
-			Level: "ERROR", Message: "projectRoot is required",
+			Level: "ERROR", Code: "request.projectRoot.required", Message: "projectRoot is required", Details: map[string]any{},
 		})
 		return d, nil
 	}
@@ -142,7 +142,7 @@ func parse(req protocol.ParseRequest, goplsSession *gopls.Session, goplsErr erro
 		d := protocol.EmptyDelta(req)
 		d.Scope.ProjectRoot = abs
 		d.Diagnostics = append(d.Diagnostics, protocol.Diagnostic{
-			Level: "ERROR", Message: err.Error(),
+			Level: "ERROR", Code: "load.packages.failed", Message: err.Error(), Details: map[string]any{},
 		})
 		return d, nil
 	}

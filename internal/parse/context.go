@@ -121,9 +121,10 @@ func (c *Context) addRel(rel protocol.CodeRelationship) {
 
 func (c *Context) diag(level, msg string) {
 	c.Delta.Diagnostics = append(c.Delta.Diagnostics, protocol.Diagnostic{
-		Level:    level,
-		Severity: level,
-		Message:  msg,
+		Level:   level,
+		Code:    "parser.go",
+		Message: msg,
+		Details: map[string]any{},
 	})
 }
 
